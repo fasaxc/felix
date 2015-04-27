@@ -13,7 +13,7 @@ _log = logging.getLogger(__name__)
 # CONFIG PARAMS.
 EGG_PATH = "eggs/"
 BGP_PEER_IP = "172.18.203.239"
-BGP_AS = 65530
+BGP_AS = "65530"
 PUBLIC_IP = "172.18.203.240"
 CONTROLLER_PUBLIC_IP = PUBLIC_IP
 PUBLIC_IPV6 = "2620:104:4001:194:250:56ff:fe92:1f50"
@@ -256,7 +256,7 @@ def main():
         if not control_node:
             run(["yum", "update", "-y"])
 
-        run(["yum", "install", "openstack-neutron"])
+        run(["yum", "install", "-y", "openstack-neutron"])
 
         run(["service", "neutron-openvswitch-agent", "stop"], fail_on_error=False)
         run(["service", "openvswitch", "stop"], fail_on_error=False)
@@ -291,7 +291,7 @@ def main():
             run(["service", "openstack-nova-metadata-api", "restart"])
             run(["chkconfig", "openstack-nova-metadata-api", "on"])
 
-        run(["yum", "install", "bird", "bird6"])
+        run(["yum", "install", "-y", "bird", "bird6"])
 
         if not control_node:
             # Install etcd.
