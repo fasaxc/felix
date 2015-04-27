@@ -177,8 +177,7 @@ def main():
             with open("/etc/fstab", "a") as fstab:
                 fstab.write("\ntmpfs /var/lib/etcd tmpfs "
                             "nodev,nosuid,noexec,nodiratime,size=512M 0 0\n")
-                fstab.flush()
-                run(["mount", "-a"])
+            run(["mount", "-a"])
         if "/var/lib/etcd" not in run(["mount"]):
             _log.error("Failed to mount etcd RAM disk.")
             sys.exit(2)
@@ -316,7 +315,7 @@ def main():
                 with open("/etc/fstab", "a") as fstab:
                     fstab.write("\ntmpfs /var/lib/etcd tmpfs "
                                 "nodev,nosuid,noexec,nodiratime,size=512M 0 0\n")
-                    run(["mount", "-a"])
+                run(["mount", "-a"])
             if "/var/lib/etcd" not in run(["mount"]):
                 _log.error("Failed to mount etcd RAM disk.")
                 sys.exit(2)
