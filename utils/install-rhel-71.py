@@ -85,15 +85,20 @@ def backup_file(filename, now):
 
 
 def replace_config(lines, config_item, new_value):
+    """
+    Replace config_item with new_value, or remove it if new_value == None
+    """
     new_lines = []
     replacement_line = "%s = %s\n" % (config_item, new_value)
     found = False
     for line in lines:
         if re.match(r"\b%s\b.*=" % re.escape(config_item), line):
-            line = replacement_line
             found = True
-        new_lines.append(line)
-    if not found:
+            if new_value is not None:
+                new_lines.append(replacement_line)
+        else:
+            new_lines.append(line)
+    if not found and new_value is not None:
         new_lines.append(replacement_line)
     return new_lines
 
@@ -217,8 +222,8 @@ def main():
         with open(filename, "r") as f:
             lines = f.readlines()
         lines = replace_config(lines, "clear_emulator_capabilities", "0")
-        lines = replace_config(lines, "user", "root")
-        lines = replace_config(lines, "group", "root")
+        lines = replace_config(lines, "user", '"root"')
+        lines = replace_config(lines, "group", '"root"')
         lines = replace_config(
             lines,
             "cgroup_device_acl",
@@ -237,7 +242,7 @@ def main():
 
 
         _log.info("Updating nova config.")
-        filename = "/etc/libvirt/qemu.conf"
+        filename = "/etc/nova/nova.conf"
         bak_file = backup_file(filename, now)
         with open(filename, "r") as f:
             lines = f.readlines()
@@ -332,6 +337,8 @@ def main():
 
         _log.info("Installing calico-compute")
         run(["yum", "install", "-y", "calico-compute"])
+        run(["cp", "-r", "/etc/calico/felix.cfg.example", "/etc/calico/felix.cfg"])
+        run(["systemctl", "restart", "calico-felix"])
 
         run(["/usr/bin/calico-gen-bird-conf.sh", PUBLIC_IP, BGP_PEER_IP, BGP_AS])
         run(["/usr/bin/calico-gen-bird6-conf.sh", PUBLIC_IP, PUBLIC_IPV6, BGP_PEER_IPV6, BGP_AS])
