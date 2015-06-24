@@ -279,7 +279,7 @@ class _EtcdWatcher(gevent.Greenlet):
 
     def _wait_for_ready(self):
         _log.info("Waiting for etcd to be ready...")
-        t = self.update_monitor.tracker(None, tag="wait-for-ready",
+        t = self.update_monitor.create_tracker(None, tag="wait-for-ready",
                                         replace_all=True)
         ready = False
         while not ready:
@@ -344,7 +344,7 @@ class _EtcdWatcher(gevent.Greenlet):
         initial_dump = self.client.read(VERSION_DIR, recursive=True)
         _log.info("Loaded snapshot from etcd cluster %s, parsing it...",
                   self.client.expected_cluster_id)
-        tracker = self.update_monitor.tracker(initial_dump.etcd_index,
+        tracker = self.update_monitor.create_tracker(initial_dump.etcd_index,
                                               tag="load initial dump")
         rules_by_id = {}
         tags_by_id = {}
@@ -664,7 +664,7 @@ class TrackingPathDispatcher(PathDispatcher):
         self.update_monitor = update_monitor
 
     def _call_handler_fn(self, handler_fn, response, captures):
-        tracker = self.update_monitor.tracker(response.etcd_index,
+        tracker = self.update_monitor.create_tracker(response.etcd_index,
                                               tag=(response.key,
                                                    response.action))
         handler_fn(response, tracker=tracker, **captures)

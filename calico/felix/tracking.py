@@ -19,6 +19,7 @@ felix.tracking
 Function to support tracking of updates and status reporting.
 """
 import gevent
+from gevent.lock import Semaphore
 from calico import monotonic
 
 import logging
@@ -27,18 +28,30 @@ import blist
 
 _log = logging.getLogger(__name__)
 
+MAX_TRACKERS = 10000
+MAX_TRACKER_AGE = 60
+
 
 class UpdateMonitor(object):
-    def __init__(self):
+    def __init__(self,
+                 max_trackers=MAX_TRACKERS,
+                 max_tracker_age=MAX_TRACKER_AGE):
+        self.max_trackers = max_trackers
+        self.max_tracker_age = max_tracker_age
         # Sorted dictionary from update ID to WorkTracker.
         self._trackers = blist.sorteddict()
+        # Lock protecting all access to self._trackers.  Since gevent uses
+        # explicit yields to context switch we could avoid this with careful
+        # programming.  However, it's very easy to yield due to IO, caused by
+        # logging, for example.  Better safe than sorry!
+        self._trackers_lock = Semaphore()
         # Highest update ID which is complete and all lower IDs are also
         # complete.
         self.complete_hwm = None
         self.seen_hwm = None
         gevent.spawn(self._loop)
 
-    def tracker(self, update_id, replace_all=False, tag=None):
+    def create_tracker(self, update_id, replace_all=False, tag=None):
         """
         Create a new WorkTracker.
 
@@ -49,42 +62,86 @@ class UpdateMonitor(object):
         :param tag: Opaque string, used to identify the type/meaning of the
             update.
         """
-        if replace_all:
-            self._trackers.clear()
-            self.complete_hwm = None
-            self.seen_hwm = None
-        self.seen_hwm = max(self.seen_hwm, update_id)
-        tracker = WorkTracker(self, update_id, tag=tag)
-        self._trackers[update_id] = tracker
+        with self._trackers_lock:
+            if replace_all:
+                self._trackers.clear()
+                self.complete_hwm = None
+                self.seen_hwm = None
+            else:
+                self._maybe_clean_up()
+            self.seen_hwm = max(self.seen_hwm, update_id)
+            tracker = WorkTracker(self, update_id, tag=tag)
+            self._trackers[update_id] = tracker
         return tracker
 
-    def on_work_complete(self, tracker):
+    def _maybe_clean_up(self):
+        num_too_old = 0
+        num_young = 0
+        if len(self._trackers) > self.max_trackers:
+            # Too many trackers, either we're leaking them or we're under
+            # very heavy load.
+            _log.warning("Too many WorkTrackers outstanding, cleaning up.")
+            while len(self._trackers) > self.max_trackers * 0.8:
+                update_id, oldest_tracker = self._trackers.popitem()
+                age = oldest_tracker.time_since_last_update
+                if oldest_tracker.finished:
+                    self.complete_hwm = max(oldest_tracker.update_id,
+                                            self.complete_hwm)
+                    continue
+                elif age > self.max_tracker_age:
+                    # Oldest tracker is very old, probably leaked.
+                    if num_too_old == 0:
+                        _log.error("%s still outstanding after %.1f seconds.  "
+                                   "Discarding. Suppressing further errors "
+                                   "from this cleanup run.",
+                                   oldest_tracker, age)
+                    num_too_old += 1
+                else:
+                    # Still young, probably just heavy load.
+                    if num_young == 0:
+                        _log.error("Discarding unfinished %s due to heavy "
+                                   "load (age=%.2f). Suppressing further "
+                                   "errors from this cleanup run.",
+                                   oldest_tracker, age)
+                    num_young += 1
+            _log.warning("Discarded %s probably leaked trackers and %s due"
+                         "to heavy load.", num_too_old, num_young)
+            self._clean_up_completed_trackers()
+
+    def on_tracker_complete(self, tracker):
         """
         Called by a WorkTracker when the work it is tracking is complete.
         """
+        with self._trackers_lock:
+            self._clean_up_completed_trackers()
+
+    def _clean_up_completed_trackers(self):
+        # If updates are completed out-of-order, this tracker may unblock a
+        # lot of already-completed updates.  (We can only remove these once
+        # all previous updates are done because we need to track their
+        # update IDs to calculate the HWM.
         to_delete = []
         for up_id, tracker in self._trackers.iteritems():
             if tracker.finished:
                 to_delete.append(up_id)
                 self.complete_hwm = max(tracker.update_id,
-                                           self.complete_hwm)
+                                        self.complete_hwm)
             else:
                 break
         for up_id in to_delete:
             self._trackers.pop(up_id, None)
-
-        self._trackers.pop(tracker.update_id, None)
 
     def _loop(self):
         while True:
             gevent.sleep(10)
             _log.info("Highest seen: %s complete: %s; outstanding (%s):",
                       self.seen_hwm, self.complete_hwm, len(self._trackers))
-            _tracker_copy = self._trackers.copy()
+            with self._trackers_lock:
+                _tracker_copy = self._trackers.copy()
             for k, v in _tracker_copy.iteritems():
                 _log.info("Work item %s: %s", k, v)
                 if v.time_since_last_update > 10:
-                    _log.warning("Work item %s has gone 10s without update")
+                    _log.warning("Work item %s has gone 10s without update", v)
 
 
 class _TrackerBase(object):
@@ -142,7 +199,8 @@ class WorkTracker(_TrackerBase):
         self._work_count -= number
         assert self._work_count >= 0
         if self.finished:
-            self._monitor.on_work_complete(self)
+            _log.debug("%s complete", self)
+            self._monitor.on_tracker_complete(self)
 
     def on_error(self, message):
         _log.error("%s Error logged: %s", self, message)

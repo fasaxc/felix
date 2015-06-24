@@ -22,8 +22,6 @@ The main logic for Felix.
 
 # Monkey-patch before we do anything else...
 from gevent import monkey
-from calico.felix.tracking import UpdateMonitor
-
 monkey.patch_all()
 
 import functools
@@ -48,6 +46,7 @@ from calico.felix.endpoint import EndpointManager
 from calico.felix.ipsets import IpsetManager, IpsetActor, HOSTS_IPSET_V4
 from calico.felix.masq import MasqueradeManager
 from calico.felix.fetcd import EtcdAPI
+from calico.felix.tracking import UpdateMonitor
 
 _log = logging.getLogger(__name__)
 
