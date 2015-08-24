@@ -33,6 +33,7 @@ import etcd
 import gevent
 import sys
 from gevent.event import Event
+from gevent.threadpool import ThreadPool
 from urllib3 import Timeout
 import urllib3.exceptions
 from urllib3.exceptions import ReadTimeoutError, ConnectTimeoutError
@@ -83,6 +84,9 @@ RESYNC_KEYS = [
     IPAM_V4_DIR,
     POOL_V4_DIR,
 ]
+
+
+_pool = ThreadPool(1)
 
 
 class EtcdAPI(Actor):

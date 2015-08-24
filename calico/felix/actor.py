@@ -130,7 +130,7 @@ class Actor(object):
     Class that contains a queue and a greenlet serving that queue.
     """
 
-    max_ops_before_yield = 10000
+    max_ops_before_yield = 1000
     """Number of calls to self._maybe_yield before it yields"""
 
     def __init__(self, qualifier=None):
@@ -356,7 +356,7 @@ class Actor(object):
         """
         self._op_count += 1
         if self._op_count >= self.max_ops_before_yield:
-            gevent.sleep()
+            gevent.sleep(0.001)
             self._op_count = 0
 
     def __str__(self):

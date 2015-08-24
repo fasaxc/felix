@@ -81,7 +81,8 @@ class EndpointManager(ReferenceManager):
         obj.on_endpoint_update(ep, async=True)
 
     @actor_message()
-    def apply_snapshot(self, endpoints_by_id):
+    def apply_snapshot(self, endpoints_by_id, force_reprogram=False):
+        _log.info("%s started applying snapshot", self)
         # Tell the dispatch chains about the local endpoints in advance so
         # that we don't flap the dispatch chain at start-of-day.
         local_iface_name_to_ep_id = {}
@@ -95,12 +96,13 @@ class EndpointManager(ReferenceManager):
         missing_endpoints = set(self.endpoints_by_id.keys())
         for endpoint_id, endpoint in endpoints_by_id.iteritems():
             self.on_endpoint_update(endpoint_id, endpoint,
-                                    force_reprogram=True)
+                                    force_reprogram=force_reprogram)
             missing_endpoints.discard(endpoint_id)
             self._maybe_yield()
         for endpoint_id in missing_endpoints:
             self.on_endpoint_update(endpoint_id, None)
             self._maybe_yield()
+        _log.info("%s finished applying snapshot", self)
 
     @actor_message()
     def on_endpoint_update(self, endpoint_id, endpoint, force_reprogram=False):
@@ -116,17 +118,25 @@ class EndpointManager(ReferenceManager):
             _log.debug("Skipping endpoint %s; not on our host.", endpoint_id)
             return
 
-        if self._is_starting_or_live(endpoint_id):
-            # Local endpoint thread is running; tell it of the change.
-            _log.info("Update for live endpoint %s", endpoint_id)
-            self.objects_by_id[endpoint_id].on_endpoint_update(
-                endpoint, force_reprogram=force_reprogram, async=True)
+        if (not force_reprogram and
+                self.endpoints_by_id.get(endpoint_id) == endpoint):
+            # Optimization: the endpoint hasn't changed so there's nothing to
+            # do.
+            _log.debug("Endpoint hasn't changed, ignoring.")
+            return
 
         old_ep = self.endpoints_by_id.pop(endpoint_id, {})
         # Interface name shouldn't change but popping it now is correct for
         # deletes and we add it back in below on create/modify.
         old_iface_name = old_ep.get("name")
         self.endpoint_id_by_iface_name.pop(old_iface_name, None)
+
+        if self._is_starting_or_live(endpoint_id):
+            # Local endpoint thread is running; tell it of the change.
+            _log.info("Update for live endpoint %s", endpoint_id)
+            self.objects_by_id[endpoint_id].on_endpoint_update(
+                endpoint, force_reprogram=force_reprogram, async=True)
+
         if endpoint is None:
             # Deletion. Remove from the list.
             _log.info("Endpoint %s deleted", endpoint_id)

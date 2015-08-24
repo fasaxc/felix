@@ -21,10 +21,17 @@ The main logic for Felix.
 """
 
 # Monkey-patch before we do anything else...
-import datetime
 from gevent import monkey
 monkey.patch_all()
 
+import geventhttpclient.httplib
+geventhttpclient.httplib.patch()
+
+import simplejson
+import sys
+sys.modules["json"] = simplejson
+
+import datetime
 import functools
 import logging
 import optparse
@@ -215,10 +222,12 @@ def _main_greenlet(config):
 
 
 def dump_profiling_data():
+    GreenletProfiler.stop()
     stats = GreenletProfiler.get_func_stats()
     stats.print_all()
     stats.save("/var/log/calico/felix-%s.callgrind" %
                datetime.datetime.now().isoformat(), type="callgrind")
+    start_profiling()
 
 
 def main():
