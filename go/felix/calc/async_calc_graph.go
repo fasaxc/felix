@@ -36,7 +36,7 @@ var (
 	})
 	resyncsStarted = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "felix_resyncs_started",
-		Help: "Current datastore state.",
+		Help: "Number of resyncs started.",
 	})
 	statusToGaugeValue = map[api.SyncStatus]float64{
 		api.WaitForDatastore: 1,
