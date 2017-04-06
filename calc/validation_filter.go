@@ -20,19 +20,20 @@ import (
 
 	"github.com/Sirupsen/logrus"
 
+	"github.com/projectcalico/felix/dispatcher"
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/validator"
 )
 
-func NewValidationFilter(sink api.SyncerCallbacks) *ValidationFilter {
+func NewValidationFilter(sink Callbacks) *ValidationFilter {
 	return &ValidationFilter{
 		sink: sink,
 	}
 }
 
 type ValidationFilter struct {
-	sink api.SyncerCallbacks
+	sink Callbacks
 }
 
 func (v *ValidationFilter) OnStatusUpdated(status api.SyncStatus) {
@@ -40,8 +41,8 @@ func (v *ValidationFilter) OnStatusUpdated(status api.SyncStatus) {
 	v.sink.OnStatusUpdated(status)
 }
 
-func (v *ValidationFilter) OnUpdates(updates []api.Update) {
-	filteredUpdates := make([]api.Update, len(updates))
+func (v *ValidationFilter) OnUpdates(updates []dispatcher.Update) {
+	filteredUpdates := make([]dispatcher.Update, len(updates))
 	for i, update := range updates {
 		logCxt := logrus.WithFields(logrus.Fields{
 			"key":   update.Key,

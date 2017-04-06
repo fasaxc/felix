@@ -19,6 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/projectcalico/felix/dispatcher"
+	"github.com/projectcalico/felix/epkey"
 	"github.com/projectcalico/felix/multidict"
 	"github.com/projectcalico/felix/set"
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
@@ -53,7 +54,7 @@ type PolicyResolver struct {
 	policyIDToEndpointIDs multidict.IfaceToIface
 	endpointIDToPolicyIDs multidict.IfaceToIface
 	sortedTierData        *tierInfo
-	endpoints             map[model.Key]interface{}
+	endpoints             map[epkey.EndpointKey]interface{}
 	dirtyEndpoints        set.Set
 	sortRequired          bool
 	policySorter          *PolicySorter
@@ -62,7 +63,7 @@ type PolicyResolver struct {
 }
 
 type PolicyResolverCallbacks interface {
-	OnEndpointTierUpdate(endpointKey model.Key, endpoint interface{}, filteredTiers []tierInfo)
+	OnEndpointTierUpdate(endpointKey epkey.EndpointKey, endpoint interface{}, filteredTiers []tierInfo)
 }
 
 func NewPolicyResolver() *PolicyResolver {
@@ -70,7 +71,7 @@ func NewPolicyResolver() *PolicyResolver {
 		policyIDToEndpointIDs: multidict.NewIfaceToIface(),
 		endpointIDToPolicyIDs: multidict.NewIfaceToIface(),
 		sortedTierData:        NewTierInfo("default"),
-		endpoints:             make(map[model.Key]interface{}),
+		endpoints:             make(map[epkey.EndpointKey]interface{}),
 		dirtyEndpoints:        set.New(),
 		policySorter:          NewPolicySorter(),
 	}
@@ -78,15 +79,14 @@ func NewPolicyResolver() *PolicyResolver {
 
 func (pr *PolicyResolver) RegisterWith(allUpdDispatcher, localEndpointDispatcher *dispatcher.Dispatcher) {
 	allUpdDispatcher.Register(model.PolicyKey{}, pr.OnUpdate)
-	localEndpointDispatcher.Register(model.WorkloadEndpointKey{}, pr.OnUpdate)
-	localEndpointDispatcher.Register(model.HostEndpointKey{}, pr.OnUpdate)
+	localEndpointDispatcher.Register(epkey.EndpointKey(""), pr.OnUpdate)
 	localEndpointDispatcher.RegisterStatusHandler(pr.OnDatamodelStatus)
 }
 
-func (pr *PolicyResolver) OnUpdate(update api.Update) (filterOut bool) {
+func (pr *PolicyResolver) OnUpdate(update dispatcher.Update) (filterOut bool) {
 	policiesDirty := false
 	switch key := update.Key.(type) {
-	case model.WorkloadEndpointKey, model.HostEndpointKey:
+	case epkey.EndpointKey:
 		if update.Value != nil {
 			pr.endpoints[key] = update.Value
 		} else {
@@ -153,13 +153,15 @@ func (pr *PolicyResolver) maybeFlush() {
 	pr.dirtyEndpoints = set.New()
 }
 
-func (pr *PolicyResolver) sendEndpointUpdate(endpointID interface{}) error {
+func (pr *PolicyResolver) sendEndpointUpdate(item interface{}) error {
+	// We use this method with a set iteration so we need to cast the arg back to the
+	// expected type.
+	endpointID := item.(epkey.EndpointKey)
 	log.Debugf("Sending tier update for endpoint %v", endpointID)
-	endpoint, ok := pr.endpoints[endpointID.(model.Key)]
+	endpoint, ok := pr.endpoints[endpointID]
 	if !ok {
 		log.Debugf("Endpoint is unknown, sending nil update")
-		pr.Callbacks.OnEndpointTierUpdate(endpointID.(model.Key),
-			nil, []tierInfo{})
+		pr.Callbacks.OnEndpointTierUpdate(endpointID, nil, []tierInfo{})
 		return nil
 	}
 	applicableTiers := []tierInfo{}
@@ -183,7 +185,6 @@ func (pr *PolicyResolver) sendEndpointUpdate(endpointID interface{}) error {
 		applicableTiers = append(applicableTiers, filteredTier)
 	}
 	log.Debugf("Endpoint tier update: %v -> %v", endpointID, applicableTiers)
-	pr.Callbacks.OnEndpointTierUpdate(endpointID.(model.Key),
-		endpoint, applicableTiers)
+	pr.Callbacks.OnEndpointTierUpdate(endpointID, endpoint, applicableTiers)
 	return nil
 }

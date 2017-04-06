@@ -18,7 +18,6 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"github.com/projectcalico/felix/dispatcher"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/net"
 )
@@ -39,7 +38,7 @@ func (h *DataplanePassthru) RegisterWith(dispatcher *dispatcher.Dispatcher) {
 	dispatcher.Register(model.IPPoolKey{}, h.OnUpdate)
 }
 
-func (h *DataplanePassthru) OnUpdate(update api.Update) (filterOut bool) {
+func (h *DataplanePassthru) OnUpdate(update dispatcher.Update) (filterOut bool) {
 	switch key := update.Key.(type) {
 	case model.HostIPKey:
 		hostname := key.Hostname

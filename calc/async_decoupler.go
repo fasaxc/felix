@@ -15,8 +15,25 @@
 package calc
 
 import (
+	"github.com/projectcalico/felix/dispatcher"
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
 )
+
+type Callbacks interface {
+	// OnStatusUpdated is called when the status of the sync status of the
+	// datastore changes.
+	OnStatusUpdated(status api.SyncStatus)
+
+	// OnUpdates is called when the Syncer has one or more updates to report.
+	// Updates consist of typed key-value pairs.  The keys are drawn from the
+	// backend.model package.  The values are either nil, to indicate a
+	// deletion (or failure to parse a value), or a pointer to a value of
+	// the associated value type.
+	//
+	// When a recursive delete is made, deleting many leaf keys, the Syncer
+	// generates deletion updates for all the leaf keys.
+	OnUpdates(updates []dispatcher.Update)
+}
 
 func NewSyncerCallbacksDecoupler() *SyncerCallbacksDecoupler {
 	return &SyncerCallbacksDecoupler{
@@ -36,13 +53,18 @@ func (a *SyncerCallbacksDecoupler) OnUpdates(updates []api.Update) {
 	a.c <- updates
 }
 
-func (a *SyncerCallbacksDecoupler) SendTo(sink api.SyncerCallbacks) {
+func (a *SyncerCallbacksDecoupler) SendTo(sink Callbacks) {
 	for obj := range a.c {
 		switch obj := obj.(type) {
 		case api.SyncStatus:
 			sink.OnStatusUpdated(obj)
 		case []api.Update:
-			sink.OnUpdates(obj)
+			// Convert the updates to our format.
+			updates := make([]dispatcher.Update, len(obj))
+			for i, u := range obj {
+				updates[i] = dispatcher.UpdateFromAPIUpdate(u)
+			}
+			sink.OnUpdates(updates)
 		}
 	}
 }

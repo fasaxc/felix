@@ -96,7 +96,7 @@ func NewAsyncCalcGraph(conf *config.Config, outputEvents chan<- interface{}) *As
 	return g
 }
 
-func (acg *AsyncCalcGraph) OnUpdates(updates []api.Update) {
+func (acg *AsyncCalcGraph) OnUpdates(updates []dispatcher.Update) {
 	log.Debugf("Got %v updates; queueing", len(updates))
 	acg.inputEvents <- updates
 }
@@ -116,7 +116,7 @@ func (acg *AsyncCalcGraph) loop() {
 		select {
 		case update := <-acg.inputEvents:
 			switch update := update.(type) {
-			case []api.Update:
+			case []dispatcher.Update:
 				// Update; send it to the dispatcher.
 				log.Debug("Pulled []KVPair off channel")
 				updStartTime := monotime.Now()

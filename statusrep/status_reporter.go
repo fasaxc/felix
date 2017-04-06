@@ -32,7 +32,7 @@ type EndpointStatusReporter struct {
 	inSync             <-chan bool
 	stop               chan bool
 	datastore          datastore
-	epStatusIDToStatus map[model.Key]string
+	epStatusIDToStatus map[interface{}]string
 	queuedDirtyIDs     set.Set
 	activeDirtyIDs     set.Set
 	reportingDelay     time.Duration
@@ -85,7 +85,7 @@ func newEndpointStatusReporterWithTickerChans(hostname string,
 		datastore:          datastore,
 		inSync:             inSync,
 		stop:               make(chan bool),
-		epStatusIDToStatus: make(map[model.Key]string),
+		epStatusIDToStatus: make(map[interface{}]string),
 		queuedDirtyIDs:     set.New(),
 		activeDirtyIDs:     set.New(),
 		resyncTicker:       resyncTicker,

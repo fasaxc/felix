@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/projectcalico/felix/dispatcher"
+	"github.com/projectcalico/felix/epkey"
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 )
@@ -76,8 +77,7 @@ func NewStatsCollector(callback func(StatsUpdate) error) *StatsCollector {
 }
 
 func (s *StatsCollector) RegisterWith(allUpdDispatcher *dispatcher.Dispatcher) {
-	allUpdDispatcher.Register(model.HostIPKey{}, s.OnUpdate)
-	allUpdDispatcher.Register(model.WorkloadEndpointKey{}, s.OnUpdate)
+	allUpdDispatcher.Register(epkey.EndpointKey(""), s.OnUpdate)
 	allUpdDispatcher.Register(model.HostEndpointKey{}, s.OnUpdate)
 	allUpdDispatcher.Register(model.HostConfigKey{}, s.OnUpdate)
 	allUpdDispatcher.RegisterStatusHandler(s.OnStatusUpdate)
@@ -91,18 +91,19 @@ func (s *StatsCollector) OnStatusUpdate(status api.SyncStatus) {
 	}
 }
 
-func (s *StatsCollector) OnUpdate(update api.Update) (filterOut bool) {
+func (s *StatsCollector) OnUpdate(update dispatcher.Update) (filterOut bool) {
 	hostname := ""
 	var counter *int
 	switch key := update.Key.(type) {
 	case model.HostIPKey:
 		hostname = key.Hostname
-	case model.WorkloadEndpointKey:
-		hostname = key.Hostname
-		counter = &s.numWorkloadEndpoints
-	case model.HostEndpointKey:
-		hostname = key.Hostname
-		counter = &s.numHostEndpoints
+	case epkey.EndpointKey:
+		hostname = key.Hostname()
+		if key.IsHostEndpoint() {
+			counter = &s.numHostEndpoints
+		} else {
+			counter = &s.numWorkloadEndpoints
+		}
 	case model.HostConfigKey:
 		hostname = key.Hostname
 	}

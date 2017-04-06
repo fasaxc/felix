@@ -18,10 +18,10 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"github.com/projectcalico/felix/dispatcher"
+	"github.com/projectcalico/felix/epkey"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/multidict"
 	"github.com/projectcalico/felix/set"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 )
 
@@ -41,29 +41,28 @@ type IPAddRemoveCallbacks interface {
 // want to generate only one "IP added" event.  We also need to wait for both endpoints to be
 // removed before generating the "IP removed" event.
 type MemberCalculator struct {
-	keyToIPs              map[model.Key][]ip.Addr
+	keyToIPs              map[epkey.EndpointKey][]ip.Addr
 	keyToMatchingIPSetIDs multidict.IfaceToString
-	ipSetIDToIPToKey      map[string]map[ip.Addr][]model.Key
+	ipSetIDToIPToKey      map[string]map[ip.Addr][]epkey.EndpointKey
 
 	callbacks IPAddRemoveCallbacks
 }
 
 func NewMemberCalculator() *MemberCalculator {
 	calc := &MemberCalculator{
-		keyToIPs:              make(map[model.Key][]ip.Addr),
+		keyToIPs:              make(map[epkey.EndpointKey][]ip.Addr),
 		keyToMatchingIPSetIDs: multidict.NewIfaceToString(),
-		ipSetIDToIPToKey:      make(map[string]map[ip.Addr][]model.Key),
+		ipSetIDToIPToKey:      make(map[string]map[ip.Addr][]epkey.EndpointKey),
 	}
 	return calc
 }
 
 func (calc *MemberCalculator) RegisterWith(allUpdDispatcher *dispatcher.Dispatcher) {
-	allUpdDispatcher.Register(model.WorkloadEndpointKey{}, calc.OnUpdate)
-	allUpdDispatcher.Register(model.HostEndpointKey{}, calc.OnUpdate)
+	allUpdDispatcher.Register(epkey.EndpointKey(""), calc.OnUpdate)
 }
 
 // MatchStarted tells this object that an endpoint now belongs to an IP set.
-func (calc *MemberCalculator) MatchStarted(key model.Key, ipSetID string) {
+func (calc *MemberCalculator) MatchStarted(key epkey.EndpointKey, ipSetID string) {
 	log.Debugf("Adding endpoint %v to IP set %v", key, ipSetID)
 	calc.keyToMatchingIPSetIDs.Put(key, ipSetID)
 	ips := calc.keyToIPs[key]
@@ -71,46 +70,47 @@ func (calc *MemberCalculator) MatchStarted(key model.Key, ipSetID string) {
 }
 
 // MatchStopped tells this object that an endpoint no longer belongs to an IP set.
-func (calc *MemberCalculator) MatchStopped(key model.Key, ipSetID string) {
+func (calc *MemberCalculator) MatchStopped(key epkey.EndpointKey, ipSetID string) {
 	log.Debugf("Removing endpoint %v from IP set %v", key, ipSetID)
 	calc.keyToMatchingIPSetIDs.Discard(key, ipSetID)
 	ips := calc.keyToIPs[key]
 	calc.removeMatchFromIndex(ipSetID, key, ips)
 }
 
-func (calc *MemberCalculator) OnUpdate(update api.Update) (filterOut bool) {
-	if update.Value == nil {
-		calc.updateEndpointIPs(update.Key, []ip.Addr{})
-		return
-	}
-	switch update.Key.(type) {
-	case model.WorkloadEndpointKey:
-		ep := update.Value.(*model.WorkloadEndpoint)
-		ips := make([]ip.Addr, 0, len(ep.IPv4Nets)+len(ep.IPv6Nets))
-		for _, net := range ep.IPv4Nets {
-			ips = append(ips, ip.FromNetIP(net.IP))
+func (calc *MemberCalculator) OnUpdate(update dispatcher.Update) (filterOut bool) {
+	switch key := update.Key.(type) {
+	case epkey.EndpointKey:
+		if update.Value == nil {
+			calc.updateEndpointIPs(key, []ip.Addr{})
+			return
 		}
-		for _, net := range ep.IPv6Nets {
-			ips = append(ips, ip.FromNetIP(net.IP))
+		switch ep := update.Value.(type) {
+		case *model.WorkloadEndpoint:
+			ips := make([]ip.Addr, 0, len(ep.IPv4Nets)+len(ep.IPv6Nets))
+			for _, net := range ep.IPv4Nets {
+				ips = append(ips, ip.FromNetIP(net.IP))
+			}
+			for _, net := range ep.IPv6Nets {
+				ips = append(ips, ip.FromNetIP(net.IP))
+			}
+			calc.updateEndpointIPs(key, ips)
+		case *model.HostEndpoint:
+			ips := make([]ip.Addr, 0,
+				len(ep.ExpectedIPv4Addrs)+len(ep.ExpectedIPv6Addrs))
+			for _, netIP := range ep.ExpectedIPv4Addrs {
+				ips = append(ips, ip.FromNetIP(netIP.IP))
+			}
+			for _, netIP := range ep.ExpectedIPv6Addrs {
+				ips = append(ips, ip.FromNetIP(netIP.IP))
+			}
+			calc.updateEndpointIPs(key, ips)
 		}
-		calc.updateEndpointIPs(update.Key, ips)
-	case model.HostEndpointKey:
-		ep := update.Value.(*model.HostEndpoint)
-		ips := make([]ip.Addr, 0,
-			len(ep.ExpectedIPv4Addrs)+len(ep.ExpectedIPv6Addrs))
-		for _, netIP := range ep.ExpectedIPv4Addrs {
-			ips = append(ips, ip.FromNetIP(netIP.IP))
-		}
-		for _, netIP := range ep.ExpectedIPv6Addrs {
-			ips = append(ips, ip.FromNetIP(netIP.IP))
-		}
-		calc.updateEndpointIPs(update.Key, ips)
 	}
 	return
 }
 
 // UpdateEndpointIPs tells this object that an endpoint has a new set of IP addresses.
-func (calc *MemberCalculator) updateEndpointIPs(endpointKey model.Key, ips []ip.Addr) {
+func (calc *MemberCalculator) updateEndpointIPs(endpointKey epkey.EndpointKey, ips []ip.Addr) {
 	log.Debugf("Endpoint %v IPs updated to %v", endpointKey, ips)
 	oldIPs := calc.keyToIPs[endpointKey]
 	if len(ips) == 0 {
@@ -162,11 +162,11 @@ func (calc *MemberCalculator) Empty() bool {
 	return true
 }
 
-func (calc *MemberCalculator) addMatchToIndex(ipSetID string, key model.Key, ips []ip.Addr) {
+func (calc *MemberCalculator) addMatchToIndex(ipSetID string, key epkey.EndpointKey, ips []ip.Addr) {
 	log.Debugf("IP set %v now matches IPs %v via %v", ipSetID, ips, key)
 	ipToKeys, ok := calc.ipSetIDToIPToKey[ipSetID]
 	if !ok {
-		ipToKeys = make(map[ip.Addr][]model.Key, len(ips))
+		ipToKeys = make(map[ip.Addr][]epkey.EndpointKey, len(ips))
 		calc.ipSetIDToIPToKey[ipSetID] = ipToKeys
 	}
 
@@ -188,7 +188,7 @@ ipLoop:
 	}
 }
 
-func (calc *MemberCalculator) removeMatchFromIndex(ipSetID string, key model.Key, ips []ip.Addr) {
+func (calc *MemberCalculator) removeMatchFromIndex(ipSetID string, key epkey.EndpointKey, ips []ip.Addr) {
 	log.Debugf("IP set %v no longer matches IPs %v via %v", ipSetID, ips, key)
 	ipToKeys := calc.ipSetIDToIPToKey[ipSetID]
 	for _, theIP := range ips {

@@ -19,9 +19,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/projectcalico/felix/dispatcher"
+	"github.com/projectcalico/felix/epkey"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/labelindex"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/selector"
@@ -58,7 +58,7 @@ type rulesUpdateCallbacks interface {
 }
 
 type endpointCallbacks interface {
-	OnEndpointTierUpdate(endpointKey model.Key,
+	OnEndpointTierUpdate(endpointKey epkey.EndpointKey,
 		endpoint interface{},
 		filteredTiers []tierInfo)
 }
@@ -119,13 +119,13 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (allUpdDi
 	// it expects a string ID.
 	var memberCalc *MemberCalculator
 	activeSelectorIndex := labelindex.NewInheritIndex(
-		func(selId, labelId interface{}) {
+		func(selId string, labelId epkey.EndpointKey) {
 			// Match started callback.
-			memberCalc.MatchStarted(labelId.(model.Key), selId.(string))
+			memberCalc.MatchStarted(labelId, selId)
 		},
-		func(selId, labelId interface{}) {
+		func(selId string, labelId epkey.EndpointKey) {
 			// Match stopped callback.
-			memberCalc.MatchStopped(labelId.(model.Key), selId.(string))
+			memberCalc.MatchStopped(labelId, selId)
 		},
 	)
 
@@ -178,8 +178,7 @@ type localEndpointDispatcherReg dispatcher.Dispatcher
 
 func (l *localEndpointDispatcherReg) RegisterWith(disp *dispatcher.Dispatcher) {
 	led := (*dispatcher.Dispatcher)(l)
-	disp.Register(model.WorkloadEndpointKey{}, led.OnUpdate)
-	disp.Register(model.HostEndpointKey{}, led.OnUpdate)
+	disp.Register(epkey.EndpointKey(""), led.OnUpdate)
 	disp.RegisterStatusHandler(led.OnDatamodelStatus)
 }
 
@@ -190,18 +189,13 @@ type endpointHostnameFilter struct {
 }
 
 func (f *endpointHostnameFilter) RegisterWith(localEndpointDisp *dispatcher.Dispatcher) {
-	localEndpointDisp.Register(model.WorkloadEndpointKey{}, f.OnUpdate)
-	localEndpointDisp.Register(model.HostEndpointKey{}, f.OnUpdate)
+	localEndpointDisp.Register(epkey.EndpointKey(""), f.OnUpdate)
 }
 
-func (f *endpointHostnameFilter) OnUpdate(update api.Update) (filterOut bool) {
+func (f *endpointHostnameFilter) OnUpdate(update dispatcher.Update) (filterOut bool) {
 	switch key := update.Key.(type) {
-	case model.WorkloadEndpointKey:
-		if key.Hostname != f.hostname {
-			filterOut = true
-		}
-	case model.HostEndpointKey:
-		if key.Hostname != f.hostname {
+	case epkey.EndpointKey:
+		if key.Hostname() != f.hostname {
 			filterOut = true
 		}
 	}

@@ -20,6 +20,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"github.com/projectcalico/felix/config"
+	"github.com/projectcalico/felix/epkey"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/multidict"
 	"github.com/projectcalico/felix/proto"
@@ -50,8 +51,8 @@ type EventSequencer struct {
 	pendingPolicyDeletes       set.Set
 	pendingProfileUpdates      map[model.ProfileRulesKey]*ParsedRules
 	pendingProfileDeletes      set.Set
-	pendingEndpointUpdates     map[model.Key]interface{}
-	pendingEndpointTierUpdates map[model.Key][]tierInfo
+	pendingEndpointUpdates     map[epkey.EndpointKey]interface{}
+	pendingEndpointTierUpdates map[epkey.EndpointKey][]tierInfo
 	pendingEndpointDeletes     set.Set
 	pendingHostIPUpdates       map[string]*net.IP
 	pendingHostIPDeletes       set.Set
@@ -94,8 +95,8 @@ func NewEventBuffer(conf configInterface) *EventSequencer {
 		pendingPolicyDeletes:       set.New(),
 		pendingProfileUpdates:      map[model.ProfileRulesKey]*ParsedRules{},
 		pendingProfileDeletes:      set.New(),
-		pendingEndpointUpdates:     map[model.Key]interface{}{},
-		pendingEndpointTierUpdates: map[model.Key][]tierInfo{},
+		pendingEndpointUpdates:     map[epkey.EndpointKey]interface{}{},
+		pendingEndpointTierUpdates: map[epkey.EndpointKey][]tierInfo{},
 		pendingEndpointDeletes:     set.New(),
 		pendingHostIPUpdates:       map[string]*net.IP{},
 		pendingHostIPDeletes:       set.New(),
@@ -332,7 +333,7 @@ func ModelHostEndpointToProto(ep *model.HostEndpoint, tiers, untrackedTiers []*p
 	}
 }
 
-func (buf *EventSequencer) OnEndpointTierUpdate(key model.Key,
+func (buf *EventSequencer) OnEndpointTierUpdate(key epkey.EndpointKey,
 	endpoint interface{},
 	filteredTiers []tierInfo,
 ) {
@@ -353,8 +354,9 @@ func (buf *EventSequencer) OnEndpointTierUpdate(key model.Key,
 }
 
 func (buf *EventSequencer) flushEndpointTierUpdates() {
-	for key, endpoint := range buf.pendingEndpointUpdates {
-		tiers, untrackedTiers := tierInfoToProtoTierInfo(buf.pendingEndpointTierUpdates[key])
+	for epKey, endpoint := range buf.pendingEndpointUpdates {
+		tiers, untrackedTiers := tierInfoToProtoTierInfo(buf.pendingEndpointTierUpdates[epKey])
+		key := epKey.ToModelKey()
 		switch key := key.(type) {
 		case model.WorkloadEndpointKey:
 			wlep := endpoint.(*model.WorkloadEndpoint)
@@ -378,13 +380,17 @@ func (buf *EventSequencer) flushEndpointTierUpdates() {
 		// Record that we've sent this endpoint.
 		buf.sentEndpoints.Add(key)
 		// And clean up the pending buffer.
-		delete(buf.pendingEndpointUpdates, key)
-		delete(buf.pendingEndpointTierUpdates, key)
+		delete(buf.pendingEndpointUpdates, epKey)
+		delete(buf.pendingEndpointTierUpdates, epKey)
 	}
 }
 
 func (buf *EventSequencer) flushEndpointTierDeletes() {
 	buf.pendingEndpointDeletes.Iter(func(item interface{}) error {
+		if epKey, ok := item.(epkey.EndpointKey); ok {
+			item = epKey.ToModelKey()
+		}
+
 		switch key := item.(type) {
 		case model.WorkloadEndpointKey:
 			buf.Callback(&proto.WorkloadEndpointRemove{

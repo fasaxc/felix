@@ -20,12 +20,13 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"github.com/projectcalico/felix/dispatcher"
+	"github.com/projectcalico/felix/epkey"
 	"github.com/projectcalico/felix/labelindex"
 	"github.com/projectcalico/felix/multidict"
 	"github.com/projectcalico/felix/set"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/selector"
+	"github.com/projectcalico/libcalico-go/lib/backend/api"
 )
 
 type ruleScanner interface {
@@ -102,8 +103,7 @@ func NewActiveRulesCalculator() *ActiveRulesCalculator {
 
 func (arc *ActiveRulesCalculator) RegisterWith(localEndpointDispatcher, allUpdDispatcher *dispatcher.Dispatcher) {
 	// It needs the filtered endpoints...
-	localEndpointDispatcher.Register(model.WorkloadEndpointKey{}, arc.OnUpdate)
-	localEndpointDispatcher.Register(model.HostEndpointKey{}, arc.OnUpdate)
+	localEndpointDispatcher.Register(epkey.EndpointKey(""), arc.OnUpdate)
 	// ...as well as all the policies and profiles.
 	allUpdDispatcher.Register(model.PolicyKey{}, arc.OnUpdate)
 	allUpdDispatcher.Register(model.ProfileRulesKey{}, arc.OnUpdate)
@@ -112,29 +112,22 @@ func (arc *ActiveRulesCalculator) RegisterWith(localEndpointDispatcher, allUpdDi
 	allUpdDispatcher.RegisterStatusHandler(arc.OnStatusUpdate)
 }
 
-func (arc *ActiveRulesCalculator) OnUpdate(update api.Update) (_ bool) {
+func (arc *ActiveRulesCalculator) OnUpdate(update dispatcher.Update) (_ bool) {
 	switch key := update.Key.(type) {
-	case model.WorkloadEndpointKey:
+	case epkey.EndpointKey:
 		if update.Value != nil {
 			log.Debugf("Updating ARC with endpoint %v", key)
-			endpoint := update.Value.(*model.WorkloadEndpoint)
-			profileIDs := endpoint.ProfileIDs
+			var profileIDs []string
+			switch v := update.Value.(type) {
+			case (*model.WorkloadEndpoint):
+				profileIDs = v.ProfileIDs
+			case (*model.HostEndpoint):
+				profileIDs = v.ProfileIDs
+			}
 			arc.updateEndpointProfileIDs(key, profileIDs)
 		} else {
 			log.Debugf("Deleting endpoint %v from ARC", key)
-			arc.updateEndpointProfileIDs(key, []string{})
-		}
-		arc.labelIndex.OnUpdate(update)
-	case model.HostEndpointKey:
-		if update.Value != nil {
-			// Figure out what's changed and update the cache.
-			log.Debugf("Updating ARC for host endpoint %v", key)
-			endpoint := update.Value.(*model.HostEndpoint)
-			profileIDs := endpoint.ProfileIDs
-			arc.updateEndpointProfileIDs(key, profileIDs)
-		} else {
-			log.Debugf("Deleting host endpoint %v from ARC", key)
-			arc.updateEndpointProfileIDs(key, []string{})
+			arc.updateEndpointProfileIDs(key, nil)
 		}
 		arc.labelIndex.OnUpdate(update)
 	case model.ProfileLabelsKey:
@@ -171,7 +164,11 @@ func (arc *ActiveRulesCalculator) OnUpdate(update api.Update) (_ bool) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			arc.labelIndex.UpdateSelector(key, sel)
+			strKey, err := model.KeyToDefaultPath(key)
+			if err != nil {
+				log.WithError(err).Panic("Failed to stringify PolicyKey")
+			}
+			arc.labelIndex.UpdateSelector(strKey, sel)
 
 			if arc.policyIDToEndpointKeys.ContainsKey(key) {
 				// If we get here, the selector still matches something,
@@ -182,7 +179,11 @@ func (arc *ActiveRulesCalculator) OnUpdate(update api.Update) (_ bool) {
 		} else {
 			log.Debugf("Removing policy %v from ARC", key)
 			delete(arc.allPolicies, key)
-			arc.labelIndex.DeleteSelector(key)
+			strKey, err := model.KeyToDefaultPath(key)
+			if err != nil {
+				log.WithError(err).Panic("Failed to stringify PolicyKey")
+			}
+			arc.labelIndex.DeleteSelector(strKey)
 			// No need to call updatePolicy() because we'll have got a matchStopped
 			// callback.
 		}
@@ -210,7 +211,7 @@ func (arc *ActiveRulesCalculator) OnStatusUpdate(status api.SyncStatus) {
 	}
 }
 
-func (arc *ActiveRulesCalculator) updateEndpointProfileIDs(key model.Key, profileIDs []string) {
+func (arc *ActiveRulesCalculator) updateEndpointProfileIDs(key epkey.EndpointKey, profileIDs []string) {
 	// Figure out which profiles have been added/removed.
 	log.Debugf("Endpoint %#v now has profile IDs: %v", key, profileIDs)
 	removedIDs, addedIDs := arc.endpointKeyToProfileIDs.Update(key, profileIDs)
@@ -238,10 +239,10 @@ func (arc *ActiveRulesCalculator) updateEndpointProfileIDs(key model.Key, profil
 	}
 }
 
-func (arc *ActiveRulesCalculator) onMatchStarted(selID, labelId interface{}) {
-	polKey := selID.(model.PolicyKey)
+func (arc *ActiveRulesCalculator) onMatchStarted(selIDStr string, labelId epkey.EndpointKey) {
+	polKey := model.KeyFromDefaultPath(selIDStr).(model.PolicyKey)
 	policyWasActive := arc.policyIDToEndpointKeys.ContainsKey(polKey)
-	arc.policyIDToEndpointKeys.Put(selID, labelId)
+	arc.policyIDToEndpointKeys.Put(polKey, labelId)
 	if !policyWasActive {
 		// Policy wasn't active before, tell the listener.  The policy
 		// must be in allPolicies because we can only match on a policy
@@ -252,12 +253,11 @@ func (arc *ActiveRulesCalculator) onMatchStarted(selID, labelId interface{}) {
 	arc.PolicyMatchListener.OnPolicyMatch(polKey, labelId)
 }
 
-func (arc *ActiveRulesCalculator) onMatchStopped(selID, labelId interface{}) {
-	polKey := selID.(model.PolicyKey)
-	arc.policyIDToEndpointKeys.Discard(selID, labelId)
-	if !arc.policyIDToEndpointKeys.ContainsKey(selID) {
+func (arc *ActiveRulesCalculator) onMatchStopped(selIDStr string, labelId epkey.EndpointKey) {
+	polKey := model.KeyFromDefaultPath(selIDStr).(model.PolicyKey)
+	arc.policyIDToEndpointKeys.Discard(polKey, labelId)
+	if !arc.policyIDToEndpointKeys.ContainsKey(polKey) {
 		// Policy no longer active.
-		polKey := selID.(model.PolicyKey)
 		log.Debugf("Policy %v no longer matches a local endpoint", polKey)
 		arc.sendPolicyUpdate(polKey)
 	}
@@ -323,17 +323,17 @@ func (arc *ActiveRulesCalculator) sendPolicyUpdate(policyKey model.PolicyKey) {
 // EndpointKeyToProfileIDMap is a specialised map that calculates the deltas to the profile IDs
 // when making an update.
 type EndpointKeyToProfileIDMap struct {
-	endpointKeyToProfileIDs map[model.Key][]string
+	endpointKeyToProfileIDs map[epkey.EndpointKey][]string
 }
 
 func NewEndpointKeyToProfileIDMap() *EndpointKeyToProfileIDMap {
 	return &EndpointKeyToProfileIDMap{
-		endpointKeyToProfileIDs: make(map[model.Key][]string),
+		endpointKeyToProfileIDs: make(map[epkey.EndpointKey][]string),
 	}
 }
 
 func (idx EndpointKeyToProfileIDMap) Update(
-	key model.Key,
+	key epkey.EndpointKey,
 	profileIDs []string,
 ) (
 	removedIDs, addedIDs map[string]bool,
