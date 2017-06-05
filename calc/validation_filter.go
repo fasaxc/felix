@@ -60,6 +60,17 @@ func (v *ValidationFilter) OnUpdates(updates []api.Update) {
 				}
 			}
 
+			switch k := update.Key.(type) {
+			case model.NodeKey:
+				// Special case: Felix doesn't understand the Node resource,
+				// extract the part we're expecting.
+				logrus.Debug("Converting Node resource to HostIP.")
+				update.Key = model.HostIPKey{Hostname: k.Hostname}
+				if update.Value != nil {
+					update.Value = update.Value.(*model.Node).FelixIPv4
+				}
+			}
+
 			switch v := update.Value.(type) {
 			case *model.WorkloadEndpoint:
 				if v.Name == "" {
