@@ -17,9 +17,9 @@ package conntrack
 import (
 	"net"
 	"os/exec"
-	"strings"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 )
 
 var conntrackDirections = []string{
@@ -55,39 +55,34 @@ type CmdIface interface {
 }
 
 func (c Conntrack) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {
-	var family string
+	var family netlink.InetFamily
 	switch ipVersion {
 	case 4:
-		family = "ipv4"
+		family = netlink.FAMILY_V4
 	case 6:
-		family = "ipv6"
+		family = netlink.FAMILY_V6
 	default:
 		log.WithField("version", ipVersion).Panic("Unknown IP version")
 	}
-	log.WithField("ip", ipAddr).Info("Removing conntrack flows")
-	for _, direction := range conntrackDirections {
-		logCxt := log.WithFields(log.Fields{"ip": ipAddr, "direction": direction})
-		// Retry a few times because the conntrack command seems to fail at random.
-		for retry := 0; retry <= numRetries; retry += 1 {
-			cmd := c.newCmd("conntrack",
-				"--family", family,
-				"--delete", direction,
-				ipAddr.String())
-			output, err := cmd.CombinedOutput()
-			if err == nil {
-				logCxt.Debug("Successfully removed conntrack flows.")
-				break
-			}
-			if strings.Contains(string(output), "0 flow entries") {
-				// Success, there were no flows.
-				logCxt.Debug("IP wasn't in conntrack")
-				break
-			}
-			if retry == numRetries {
-				logCxt.WithError(err).Error("Failed to remove conntrack flows after retries.")
-			} else {
-				logCxt.WithError(err).Warn("Failed to remove conntrack flows, will retry...")
-			}
-		}
+
+	filter := AnyIPConntrackFilter{
+		ip: ipAddr,
 	}
+	_, err := netlink.ConntrackDeleteFilter(netlink.ConntrackTable, family, &filter)
+	if err != nil {
+		log.WithError(err).Warn("Failed to delete conntrack flows, ignoring")
+	}
+	_, err = netlink.ConntrackDeleteFilter(netlink.ConntrackExpectTable, family, &filter)
+	if err != nil {
+		log.WithError(err).Warn("Failed to delete conntrack expect flows, ignoring")
+	}
+}
+
+type AnyIPConntrackFilter struct {
+	ip net.IP
+}
+
+func (f *AnyIPConntrackFilter) MatchConntrackFlow(flow *netlink.ConntrackFlow) bool {
+	return f.ip.Equal(flow.Forward.SrcIP) || f.ip.Equal(flow.Forward.DstIP) ||
+		f.ip.Equal(flow.Reverse.SrcIP) || f.ip.Equal(flow.Reverse.DstIP)
 }
