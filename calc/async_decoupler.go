@@ -20,7 +20,7 @@ import (
 
 func NewSyncerCallbacksDecoupler() *SyncerCallbacksDecoupler {
 	return &SyncerCallbacksDecoupler{
-		c: make(chan interface{}),
+		c: make(chan interface{}, 1),
 	}
 }
 
