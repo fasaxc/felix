@@ -287,8 +287,10 @@ func (r *matchBlockBuilder) AppendPortMatchBlock(
 		"srcOrDst":     srcOrDst,
 	})
 	for _, split := range numericPortSplits {
+		m := appendProtocolMatch(iptables.Match(), protocol, logCxt)
+		m = srcOrDst.AppendMatchPorts(m, split)
 		r.Rules = append(r.Rules, iptables.Rule{
-			Match:  appendProtocolMatch(srcOrDst.MatchPorts(split), protocol, logCxt),
+			Match:  m,
 			Action: iptables.SetMarkAction{Mark: markToSet},
 		})
 	}
@@ -415,12 +417,12 @@ func (sod srcOrDst) MatchNet(cidr string) iptables.MatchCriteria {
 	return nil
 }
 
-func (sod srcOrDst) MatchPorts(pr []*proto.PortRange) iptables.MatchCriteria {
+func (sod srcOrDst) AppendMatchPorts(m  iptables.MatchCriteria, pr []*proto.PortRange) iptables.MatchCriteria {
 	switch sod {
 	case src:
-		return iptables.Match().SourcePortRanges(pr)
+		return m.SourcePortRanges(pr)
 	case dst:
-		return iptables.Match().DestPortRanges(pr)
+		return m.DestPortRanges(pr)
 	}
 	log.WithField("srcOrDst", sod).Panic("Unknown source or dest type.")
 	return nil
@@ -500,15 +502,18 @@ func (r *DefaultRuleRenderer) CalculateActions(pRule *proto.Rule, ipVersion uint
 var SkipRule = errors.New("Rule skipped")
 
 func appendProtocolMatch(match iptables.MatchCriteria, protocol *proto.Protocol, logCxt *log.Entry) iptables.MatchCriteria {
-	if protocol != nil {
-		switch p := protocol.NumberOrName.(type) {
-		case *proto.Protocol_Name:
-			logCxt.WithField("protoName", p.Name).Debug("Adding protocol match")
-			match = match.Protocol(p.Name)
-		case *proto.Protocol_Number:
-			logCxt.WithField("protoNum", p.Number).Debug("Adding protocol match")
-			match = match.ProtocolNum(uint8(p.Number))
-		}
+	if protocol == nil {
+		return match
+	}
+	switch p := protocol.NumberOrName.(type) {
+	case *proto.Protocol_Name:
+		logCxt.WithField("protoName", p.Name).Debug("Adding protocol match")
+		match = match.Protocol(p.Name)
+	case *proto.Protocol_Number:
+		logCxt.WithField("protoNum", p.Number).Debug("Adding protocol match")
+		match = match.ProtocolNum(uint8(p.Number))
+	default:
+		logCxt.WithField("protocol", protocol).Panic("Unknown protocol type")
 	}
 	return match
 }

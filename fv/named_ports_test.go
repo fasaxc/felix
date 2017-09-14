@@ -31,6 +31,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	. "github.com/onsi/ginkgo/extensions/table"
 )
 
 var HaveConnectivityToPort = workload.HaveConnectivityToPort
@@ -89,7 +90,7 @@ var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloa
 				"w"+iiStr,
 				"cali1"+iiStr,
 				"10.65.0.1"+iiStr,
-				fmt.Sprintf("1100,%d", workloadTCPPort),
+				fmt.Sprintf("3000,4000,1100,%d", workloadTCPPort),
 			)
 
 			w[ii].WorkloadEndpoint.Spec.Ports = []api.EndpointPort{
@@ -139,6 +140,13 @@ var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloa
 		etcd.Stop()
 	})
 
+	type ingressEgress int
+	const (
+		ingress ingressEgress = iota
+		egress
+	)
+
+	// Baseline test with no named ports policy.
 	Context("with no named port policy", func() {
 		It("should give full connectivity to and from workload 0", func() {
 			// Outbound, w0 should be able to reach all ports on w1 & w2
@@ -155,7 +163,79 @@ var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloa
 		})
 	})
 
-	Context("with a named port policy allowing only traffic to the shared port", func() {
+	createPolicy := func(policy *api.Policy) {
+		_, err := client.Policies().Create(policy)
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	buildAllowToSharedPortPolicy := func(ie ingressEgress, numNumericPorts int) *api.Policy{
+		protoTCP := numorstring.ProtocolFromString("tcp")
+		policy := api.NewPolicy()
+		policy.Metadata.Name = "policy-1"
+		ports := []numorstring.Port{
+			numorstring.NamedPort(sharedPortName),
+		}
+		for i := 0; i < numNumericPorts; i++ {
+			ports = append(ports, numorstring.SinglePort(3000+uint16(i)))
+		}
+		entRule := api.EntityRule{
+			Ports: ports,
+		}
+		apiRule := api.Rule{
+		Action:      "allow",
+			Protocol:    &protoTCP,
+			Destination: entRule,
+		}
+		rules := []api.Rule{
+			apiRule,
+		}
+		if ie == ingress {
+			// Ingress rules, apply only to w[0].
+			policy.Spec.IngressRules = rules
+			policy.Spec.Selector = w[0].NameSelector()
+		} else {
+			// Egress rules, to get same result, apply everywhere but w[0].
+			policy.Spec.EgressRules = rules
+			policy.Spec.Selector = fmt.Sprintf("!(%s)", w[0].NameSelector())
+		}
+		return policy
+	}
+
+	FDescribeTable("with a named port policy allowing only traffic to the shared port",
+		func(ie ingressEgress, numNumericPorts int) {
+			pol := buildAllowToSharedPortPolicy(ie, numNumericPorts)
+			createPolicy(pol)
+
+			// Inbound to w0Port should now be blocked.
+			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
+			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
+
+			// Inbound to numeric should now be blocked.
+			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
+			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
+
+			// Outbound, w0 should be able to reach all ports on w1 & w2
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
+
+			// Inbound, w1 and w2 should be able to reach the shared port on w0.
+			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], sharedPort))
+			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], sharedPort))
+		},
+
+		Entry("ingress, no-numeric", ingress, 0),
+		Entry("egress, no-numeric", egress, 0),
+		// Adding a numeric port changes the way we render iptables rules to use blocks.
+		Entry("ingress, 1 numeric", ingress, 1),
+		Entry("egress, 1 numeric", egress, 1),
+		// Adding >15 numeric ports requires more than one block.
+		Entry("ingress, 16 numeric", ingress, 16),
+		Entry("egress, 16 numeric", egress, 16),
+	)
+
+	Context("with a named port ingress policy not allowing traffic to the shared port", func() {
 		BeforeEach(func() {
 			protoTCP := numorstring.ProtocolFromString("tcp")
 			policy := api.NewPolicy()
@@ -163,6 +243,44 @@ var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloa
 			policy.Spec.IngressRules = []api.Rule{
 				{
 					Action:   "allow",
+					Protocol: &protoTCP,
+					Destination: api.EntityRule{
+						NotPorts: []numorstring.Port{
+							numorstring.NamedPort(sharedPortName),
+						},
+					},
+				},
+			}
+			policy.Spec.Selector = w[0].NameSelector()
+			_, err := client.Policies().Create(policy)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should give connectivity only to the shared port on w0", func() {
+			// Inbound to w0Port should still be allowed.
+			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
+			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
+
+			// Outbound, w0 should be able to reach all ports on w1 & w2
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
+
+			// Inbound, w1 and w2 should not be able to reach the shared port on w0.
+			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
+			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
+		})
+	})
+
+	Context("with a named port egress policy blocking traffic to the shared port", func() {
+		BeforeEach(func() {
+			protoTCP := numorstring.ProtocolFromString("tcp")
+			policy := api.NewPolicy()
+			policy.Metadata.Name = "policy-1"
+			policy.Spec.EgressRules = []api.Rule{
+				{
+					Action:   "drop",
 					Protocol: &protoTCP,
 					Destination: api.EntityRule{
 						Ports: []numorstring.Port{
@@ -177,102 +295,19 @@ var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloa
 		})
 
 		It("should give connectivity only to the shared port on w0", func() {
-			// Inbound to w0Port should now be blocked.
-			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
-			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
-
-			// Outbound, w0 should be able to reach all ports on w1 & w2
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
-
-			// Inbound, w1 and w2 should be able to reach the shared port on w0.
-			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], sharedPort))
-			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], sharedPort))
-		})
-	})
-
-	Context("with ingress-only restriction for workload 0", func() {
-
-		BeforeEach(func() {
-			policy := api.NewPolicy()
-			policy.Metadata.Name = "policy-1"
-			allowFromW1 := api.Rule{
-				Action: "allow",
-				Source: api.EntityRule{
-					Selector: w[1].NameSelector(),
-				},
-			}
-			policy.Spec.IngressRules = []api.Rule{allowFromW1}
-			policy.Spec.Selector = w[0].NameSelector()
-			_, err := client.Policies().Create(policy)
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("only w1 can connect into w0, but egress from w0 is unrestricted", func() {
-			// Outbound, w0 should be able to reach all ports on w1 & w2
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
-
-			// Inbound, w1 and w2 should be able to reach all ports on w0.
-			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], sharedPort))
+			// Inbound to w0Port should still be allowed.
 			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
+			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
+
+			// Outbound, w0 should be able to reach all ports on w1 & w2
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
+			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
+
+			// Inbound, w1 and w2 should not be able to reach the shared port on w0.
+			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
 			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
-			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
 		})
 	})
-	//
-	//Context("with egress-only restriction for workload 0", func() {
-	//
-	//	BeforeEach(func() {
-	//		policy := api.NewPolicy()
-	//		policy.Metadata.Name = "policy-1"
-	//		allowToW1 := api.Rule{
-	//			Action: "allow",
-	//			Destination: api.EntityRule{
-	//				Selector: w[1].NameSelector(),
-	//			},
-	//		}
-	//		policy.Spec.EgressRules = []api.Rule{allowToW1}
-	//		policy.Spec.Selector = w[0].NameSelector()
-	//		_, err := client.Policies().Create(policy)
-	//		Expect(err).NotTo(HaveOccurred())
-	//	})
-	//
-	//	It("ingress to w0 is unrestricted, but w0 can only connect out to w1", func() {
-	//		Expect(w[1]).To(HaveConnectivityTo(w[0]))
-	//		Expect(w[2]).To(HaveConnectivityTo(w[0]))
-	//		Expect(w[0]).To(HaveConnectivityTo(w[1]))
-	//		Expect(w[0]).NotTo(HaveConnectivityTo(w[2]))
-	//	})
-	//})
-	//
-	//Context("with ingress rules and types [ingress,egress]", func() {
-	//
-	//	BeforeEach(func() {
-	//		policy := api.NewPolicy()
-	//		policy.Metadata.Name = "policy-1"
-	//		allowFromW1 := api.Rule{
-	//			Action: "allow",
-	//			Source: api.EntityRule{
-	//				Selector: w[1].NameSelector(),
-	//			},
-	//		}
-	//		policy.Spec.IngressRules = []api.Rule{allowFromW1}
-	//		policy.Spec.Selector = w[0].NameSelector()
-	//		policy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress, api.PolicyTypeEgress}
-	//		_, err := client.Policies().Create(policy)
-	//		Expect(err).NotTo(HaveOccurred())
-	//	})
-	//
-	//	It("only w1 can connect into w0, and all egress from w0 is denied", func() {
-	//		Expect(w[1]).To(HaveConnectivityTo(w[0]))
-	//		Expect(w[2]).NotTo(HaveConnectivityTo(w[0]))
-	//		Expect(w[0]).NotTo(HaveConnectivityTo(w[1]))
-	//		Expect(w[0]).NotTo(HaveConnectivityTo(w[2]))
-	//	})
-	//})
 })
