@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/utils"
 	"github.com/projectcalico/felix/fv/workload"
@@ -45,11 +44,11 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 
 		etcd = RunEtcd()
 
-		felix = RunFelix(etcd.IP)
-
 		client = GetEtcdClient(etcd.IP)
 		err := client.EnsureInitialized()
 		Expect(err).NotTo(HaveOccurred())
+
+		felix = RunFelix(etcd.IP)
 
 		felixNode := api.NewNode()
 		felixNode.Metadata.Name = felix.Hostname
@@ -72,7 +71,7 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 		// Create three workloads, using that profile.
 		for ii := 0; ii < 3; ii++ {
 			iiStr := strconv.Itoa(ii)
-			w[ii] = workload.Run(felix, "w"+iiStr, "cali1"+iiStr, "10.65.0.1"+iiStr, "8055")
+			w[ii] = workload.Run(felix, "cali1"+iiStr, "10.65.0.1"+iiStr, "8055")
 			w[ii].Configure(client)
 		}
 	})
