@@ -217,65 +217,71 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 		//                 or an egress policy on all the other workloads.
 		//
 		// numNumericPorts controls the number of extra numeric ports we include in the list.
+		//
+		// useDestSel if set, adds a destination selector (picking out w[0]) to the rule.
 		func(negated bool, ingressOrEgress ingressEgress, numNumericPorts int, useDestSel bool) {
 			pol := buildSharedPortPolicy(negated, ingressOrEgress, numNumericPorts, useDestSel)
 			createPolicy(pol)
 
+			var cc = &workload.ConnectivityChecker{}
+
 			if negated {
-				// Only traffic not going to listed ports is allowed.
+				// Only traffic _not_ going to listed ports is allowed.
 
-				// w1 and w2 should not be able to reach the shared port on w0.
-				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
-				Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
-
-				// Inbound to w0Port should still be allowed.
-				Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
-				Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
-
+				// Shared port is listed so w1 and w2 should not be able to reach the shared port
+				// on w0.
+				cc.ExpectNone(w[1], w[0], sharedPort)
+				cc.ExpectNone(w[2], w[0], sharedPort)
+				// Inbound to w0 port should still be allowed.
+				cc.ExpectSome(w[1], w[0], w0Port)
+				cc.ExpectSome(w[2], w[0], w0Port)
 				// Inbound to unlisted numeric should still be allowed.
-				Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 4000))
-				Eventually(w[2]).Should(HaveConnectivityToPort(w[0], 4000))
+				cc.ExpectSome(w[1], w[0], 4000)
+				cc.ExpectSome(w[2], w[0], 4000)
 
 				if numNumericPorts > 0 {
-					Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 3000))
+					cc.ExpectNone(w[1], w[0], 3000)
 				} else {
-					Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 3000))
+					cc.ExpectSome(w[1], w[0], 3000)
 				}
+
 			} else {
 				// Only traffic to listed ports is allowed.
 
 				// Inbound to w0Port should now be blocked.
-				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
-				Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
+				cc.ExpectNone(w[1], w[0], w0Port)
+				cc.ExpectNone(w[2], w[0], w0Port)
 
 				// Inbound to unlisted numeric should now be blocked.
-				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
-				Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
+				cc.ExpectNone(w[1], w[0], 4000)
+				cc.ExpectNone(w[2], w[0], 4000)
 
 				// w1 and w2 should still be able to reach the shared port on w0.
-				Eventually(w[1]).Should(HaveConnectivityToPort(w[0], sharedPort))
-				Eventually(w[2]).Should(HaveConnectivityToPort(w[0], sharedPort))
+				cc.ExpectSome(w[1], w[0], sharedPort)
+				cc.ExpectSome(w[2], w[0], sharedPort)
 
 				if numNumericPorts > 0 {
-					Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 3000))
+					cc.ExpectSome(w[1], w[0], 3000)
 				} else {
-					Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 3000))
+					cc.ExpectNone(w[1], w[0], 3000)
 				}
 			}
 
 			if useDestSel || (ingressOrEgress == egress && negated) {
-				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[2], sharedPort))
+				cc.ExpectNone(w[1], w[2], sharedPort)
 			} else {
 				// Otherwise, w[1] should be able to reach w[2] either because the policy is only
 				// applied to w[0] or because the rule isn't limited to w[0] as destination.
-				Eventually(w[1]).Should(HaveConnectivityToPort(w[2], sharedPort))
+				cc.ExpectSome(w[1], w[2], sharedPort)
 			}
 
 			// Outbound, w0 should be able to reach all ports on w1 & w2
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
+			cc.ExpectSome(w[0], w[1], sharedPort)
+			cc.ExpectSome(w[0], w[2], sharedPort)
+			cc.ExpectSome(w[0], w[1], w1Port)
+			cc.ExpectSome(w[0], w[2], w2Port)
+
+			Eventually(cc.ActualConnectivity, "10s", "100ms").Should(Equal(cc.ExpectedConnectivity()))
 		},
 
 		// Non-negated named port match.  The rule will allow traffic to the named port.
@@ -283,14 +289,12 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 		// No numeric ports in the rule, the IP set match will be rendered in the main rule.
 		Entry("(positive) ingress, no-numeric", false, ingress, 0, false),
 		Entry("(positive) egress, no-numeric", false, egress, 0, false),
-		Entry("(positive) egress, no-numeric with a dest selector", false, egress, 0, true),
 		// Adding a numeric port changes the way we render iptables rules to use blocks.
 		Entry("(positive) ingress, 1 numeric", false, ingress, 1, false),
 		Entry("(positive) egress, 1 numeric", false, egress, 1, false),
 		// Adding >15 numeric ports requires more than one block.
 		Entry("(positive) ingress, 16 numeric", false, ingress, 16, false),
 		Entry("(positive) egress, 16 numeric", false, egress, 16, false),
-		Entry("(positive) egress, 16 numeric with a dest selector", false, egress, 16, true),
 
 		// Negated named port match.  The rule will not match traffic to the named port (so traffic
 		// to the named port will fall through to the default deny rule).
@@ -298,13 +302,17 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 		// No numeric ports in the rule, the IP set match will be rendered in the main rule.
 		Entry("(negated) ingress, no-numeric", true, ingress, 0, false),
 		Entry("(negated) egress, no-numeric", true, egress, 0, false),
-		Entry("(negated) egress, no-numeric with a dest selector", true, egress, 0, true),
 		// Adding a numeric port changes the way we render iptables rules to use blocks.
 		Entry("(negated) ingress, 1 numeric", true, ingress, 1, false),
 		Entry("(negated) egress, 1 numeric", true, egress, 1, false),
 		// Adding >15 numeric ports requires more than one block.
 		Entry("(negated) ingress, 16 numeric", true, ingress, 16, false),
 		Entry("(negated) egress, 16 numeric", true, egress, 16, false),
+
+		// Selection of tests that include a destination selector too.
+		Entry("(positive) egress, no-numeric with a dest selector", false, egress, 0, true),
+		Entry("(positive) egress, 16 numeric with a dest selector", false, egress, 16, true),
+		Entry("(negated) egress, no-numeric with a dest selector", true, egress, 0, true),
 		Entry("(negated) egress, 16 numeric with a dest selector", true, egress, 16, true),
 	)
 })
