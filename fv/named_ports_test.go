@@ -58,15 +58,14 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 
 		etcd = RunEtcd()
 
-		felix = RunFelix(etcd.IP)
-
 		client = GetEtcdClient(etcd.IP)
-		err := client.EnsureInitialized()
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(client.EnsureInitialized).ShouldNot(HaveOccurred())
+
+		felix = RunFelix(etcd.IP)
 
 		felixNode := api.NewNode()
 		felixNode.Metadata.Name = felix.Hostname
-		_, err = client.Nodes().Create(felixNode)
+		_, err := client.Nodes().Create(felixNode)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Install a default profile that allows workloads with this profile to talk to each
@@ -161,6 +160,8 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], sharedPort))
 			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
 			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
+			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 4000))
+			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], 4000))
 		})
 	})
 
@@ -169,7 +170,7 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 		Expect(err).NotTo(HaveOccurred())
 	}
 
-	buildAllowToSharedPortPolicy := func(ie ingressEgress, numNumericPorts int) *api.Policy {
+	buildSharedPortPolicy := func(negated bool, ie ingressEgress, numNumericPorts int) *api.Policy {
 		protoTCP := numorstring.ProtocolFromString("tcp")
 		policy := api.NewPolicy()
 		policy.Metadata.Name = "policy-1"
@@ -179,8 +180,11 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 		for i := 0; i < numNumericPorts; i++ {
 			ports = append(ports, numorstring.SinglePort(3000+uint16(i)))
 		}
-		entRule := api.EntityRule{
-			Ports: ports,
+		entRule := api.EntityRule{}
+		if negated {
+			entRule.NotPorts = ports
+		} else {
+			entRule.Ports = ports
 		}
 		apiRule := api.Rule{
 			Action:      "allow",
@@ -202,113 +206,89 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 		return policy
 	}
 
-	DescribeTable("with a named port policy allowing only traffic to the shared port",
-		func(ie ingressEgress, numNumericPorts int) {
-			pol := buildAllowToSharedPortPolicy(ie, numNumericPorts)
+	DescribeTable("with a policy that matches on the shared named port",
+		// negated controls whether we put the named port in the Ports or NotPorts list.
+		//
+		// ingressOrEgress controls whether we render the policy as an ingress policy of w[0]
+		//                 or an egress policy on all the other workloads.
+		//
+		// numNumericPorts controls the number of extra numeric ports we include in the list.
+		func(negated bool, ingressOrEgress ingressEgress, numNumericPorts int) {
+			pol := buildSharedPortPolicy(negated, ingressOrEgress, numNumericPorts)
 			createPolicy(pol)
 
-			// Inbound to w0Port should now be blocked.
-			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
-			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
+			if negated {
+				// Only traffic not going to listed ports is allowed.
 
-			// Inbound to numeric should now be blocked.
-			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
-			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
+				// w1 and w2 should not be able to reach the shared port on w0.
+				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
+				Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
+
+				// Inbound to w0Port should still be allowed.
+				Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
+				Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
+
+				// Inbound to numeric should still be allowed.
+				Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 4000))
+				Eventually(w[2]).Should(HaveConnectivityToPort(w[0], 4000))
+
+				if numNumericPorts > 0 {
+					Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 3000))
+				} else {
+					Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 3000))
+				}
+			} else {
+				// Only traffic to listed ports is allowed.
+
+				// Inbound to w0Port should now be blocked.
+				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
+				Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
+
+				// Inbound to numeric should now be blocked.
+				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
+				Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
+
+				// w1 and w2 should still be able to reach the shared port on w0.
+				Eventually(w[1]).Should(HaveConnectivityToPort(w[0], sharedPort))
+				Eventually(w[2]).Should(HaveConnectivityToPort(w[0], sharedPort))
+
+				if numNumericPorts > 0 {
+					Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 3000))
+				} else {
+					Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 3000))
+				}
+			}
 
 			// Outbound, w0 should be able to reach all ports on w1 & w2
 			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
 			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
 			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
 			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
-
-			// Inbound, w1 and w2 should be able to reach the shared port on w0.
-			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], sharedPort))
-			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], sharedPort))
 		},
 
-		Entry("ingress, no-numeric", ingress, 0),
-		Entry("egress, no-numeric", egress, 0),
+		// Non-negated named port match.  The rule will allow traffic to the named port.
+
+		// No numeric ports in the rule, the IP set match will be rendered in the main rule.
+		Entry("(positive) ingress, no-numeric", false, ingress, 0),
+		Entry("(positive) egress, no-numeric", false, egress, 0),
 		// Adding a numeric port changes the way we render iptables rules to use blocks.
-		Entry("ingress, 1 numeric", ingress, 1),
-		Entry("egress, 1 numeric", egress, 1),
+		Entry("(positive) ingress, 1 numeric", false, ingress, 1),
+		Entry("(positive) egress, 1 numeric", false, egress, 1),
 		// Adding >15 numeric ports requires more than one block.
-		Entry("ingress, 16 numeric", ingress, 16),
-		Entry("egress, 16 numeric", egress, 16),
+		Entry("(positive) ingress, 16 numeric", false, ingress, 16),
+		Entry("(positive) egress, 16 numeric", false, egress, 16),
+
+		// Negated named port match.  The rule will not match traffic to the named port (so traffic
+		// to the named port will fall through to the default deny rule).
+
+		// No numeric ports in the rule, the IP set match will be rendered in the main rule.
+		Entry("(negated) ingress, no-numeric", true, ingress, 0),
+		Entry("(negated) egress, no-numeric", true, egress, 0),
+		// Adding a numeric port changes the way we render iptables rules to use blocks.
+		Entry("(negated) ingress, 1 numeric", true, ingress, 1),
+		Entry("(negated) egress, 1 numeric", true, egress, 1),
+		// Adding >15 numeric ports requires more than one block.
+		Entry("(negated) ingress, 16 numeric", true, ingress, 16),
+		Entry("(negated) egress, 16 numeric", true, egress, 16),
 	)
-
-	Context("with a named port ingress policy not allowing traffic to the shared port", func() {
-		BeforeEach(func() {
-			protoTCP := numorstring.ProtocolFromString("tcp")
-			policy := api.NewPolicy()
-			policy.Metadata.Name = "policy-1"
-			policy.Spec.IngressRules = []api.Rule{
-				{
-					Action:   "allow",
-					Protocol: &protoTCP,
-					Destination: api.EntityRule{
-						NotPorts: []numorstring.Port{
-							numorstring.NamedPort(sharedPortName),
-						},
-					},
-				},
-			}
-			policy.Spec.Selector = w[0].NameSelector()
-			_, err := client.Policies().Create(policy)
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("should give connectivity only to the shared port on w0", func() {
-			// Inbound to w0Port should still be allowed.
-			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
-			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
-
-			// Outbound, w0 should be able to reach all ports on w1 & w2
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
-
-			// Inbound, w1 and w2 should not be able to reach the shared port on w0.
-			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
-			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
-		})
-	})
-
-	Context("with a named port egress policy blocking traffic to the shared port", func() {
-		BeforeEach(func() {
-			protoTCP := numorstring.ProtocolFromString("tcp")
-			policy := api.NewPolicy()
-			policy.Metadata.Name = "policy-1"
-			policy.Spec.EgressRules = []api.Rule{
-				{
-					Action:   "drop",
-					Protocol: &protoTCP,
-					Destination: api.EntityRule{
-						Ports: []numorstring.Port{
-							numorstring.NamedPort(sharedPortName),
-						},
-					},
-				},
-			}
-			policy.Spec.Selector = w[0].NameSelector()
-			_, err := client.Policies().Create(policy)
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("should give connectivity only to the shared port on w0", func() {
-			// Inbound to w0Port should still be allowed.
-			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
-			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
-
-			// Outbound, w0 should be able to reach all ports on w1 & w2
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
-
-			// Inbound, w1 and w2 should not be able to reach the shared port on w0.
-			Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
-			Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], sharedPort))
-		})
-	})
 })
