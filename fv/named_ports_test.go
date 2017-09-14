@@ -166,11 +166,12 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 	})
 
 	createPolicy := func(policy *api.Policy) {
+		log.WithField("policy", policy).Info("Creating policy")
 		_, err := client.Policies().Create(policy)
 		Expect(err).NotTo(HaveOccurred())
 	}
 
-	buildSharedPortPolicy := func(negated bool, ie ingressEgress, numNumericPorts int) *api.Policy {
+	buildSharedPortPolicy := func(negated bool, ie ingressEgress, numNumericPorts int, useDestSel bool) *api.Policy {
 		protoTCP := numorstring.ProtocolFromString("tcp")
 		policy := api.NewPolicy()
 		policy.Metadata.Name = "policy-1"
@@ -185,6 +186,9 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 			entRule.NotPorts = ports
 		} else {
 			entRule.Ports = ports
+		}
+		if useDestSel {
+			entRule.Selector = w[0].NameSelector()
 		}
 		apiRule := api.Rule{
 			Action:      "allow",
@@ -213,8 +217,8 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 		//                 or an egress policy on all the other workloads.
 		//
 		// numNumericPorts controls the number of extra numeric ports we include in the list.
-		func(negated bool, ingressOrEgress ingressEgress, numNumericPorts int) {
-			pol := buildSharedPortPolicy(negated, ingressOrEgress, numNumericPorts)
+		func(negated bool, ingressOrEgress ingressEgress, numNumericPorts int, useDestSel bool) {
+			pol := buildSharedPortPolicy(negated, ingressOrEgress, numNumericPorts, useDestSel)
 			createPolicy(pol)
 
 			if negated {
@@ -228,7 +232,7 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 				Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
 				Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
 
-				// Inbound to numeric should still be allowed.
+				// Inbound to unlisted numeric should still be allowed.
 				Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 4000))
 				Eventually(w[2]).Should(HaveConnectivityToPort(w[0], 4000))
 
@@ -244,7 +248,7 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
 				Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], w0Port))
 
-				// Inbound to numeric should now be blocked.
+				// Inbound to unlisted numeric should now be blocked.
 				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
 				Eventually(w[2]).ShouldNot(HaveConnectivityToPort(w[0], 4000))
 
@@ -259,6 +263,14 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 				}
 			}
 
+			if useDestSel || (ingressOrEgress == egress && negated) {
+				Eventually(w[1]).ShouldNot(HaveConnectivityToPort(w[2], sharedPort))
+			} else {
+				// Otherwise, w[1] should be able to reach w[2] either because the policy is only
+				// applied to w[0] or because the rule isn't limited to w[0] as destination.
+				Eventually(w[1]).Should(HaveConnectivityToPort(w[2], sharedPort))
+			}
+
 			// Outbound, w0 should be able to reach all ports on w1 & w2
 			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
 			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
@@ -269,26 +281,30 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 		// Non-negated named port match.  The rule will allow traffic to the named port.
 
 		// No numeric ports in the rule, the IP set match will be rendered in the main rule.
-		Entry("(positive) ingress, no-numeric", false, ingress, 0),
-		Entry("(positive) egress, no-numeric", false, egress, 0),
+		Entry("(positive) ingress, no-numeric", false, ingress, 0, false),
+		Entry("(positive) egress, no-numeric", false, egress, 0, false),
+		Entry("(positive) egress, no-numeric with a dest selector", false, egress, 0, true),
 		// Adding a numeric port changes the way we render iptables rules to use blocks.
-		Entry("(positive) ingress, 1 numeric", false, ingress, 1),
-		Entry("(positive) egress, 1 numeric", false, egress, 1),
+		Entry("(positive) ingress, 1 numeric", false, ingress, 1, false),
+		Entry("(positive) egress, 1 numeric", false, egress, 1, false),
 		// Adding >15 numeric ports requires more than one block.
-		Entry("(positive) ingress, 16 numeric", false, ingress, 16),
-		Entry("(positive) egress, 16 numeric", false, egress, 16),
+		Entry("(positive) ingress, 16 numeric", false, ingress, 16, false),
+		Entry("(positive) egress, 16 numeric", false, egress, 16, false),
+		Entry("(positive) egress, 16 numeric with a dest selector", false, egress, 16, true),
 
 		// Negated named port match.  The rule will not match traffic to the named port (so traffic
 		// to the named port will fall through to the default deny rule).
 
 		// No numeric ports in the rule, the IP set match will be rendered in the main rule.
-		Entry("(negated) ingress, no-numeric", true, ingress, 0),
-		Entry("(negated) egress, no-numeric", true, egress, 0),
+		Entry("(negated) ingress, no-numeric", true, ingress, 0, false),
+		Entry("(negated) egress, no-numeric", true, egress, 0, false),
+		Entry("(negated) egress, no-numeric with a dest selector", true, egress, 0, true),
 		// Adding a numeric port changes the way we render iptables rules to use blocks.
-		Entry("(negated) ingress, 1 numeric", true, ingress, 1),
-		Entry("(negated) egress, 1 numeric", true, egress, 1),
+		Entry("(negated) ingress, 1 numeric", true, ingress, 1, false),
+		Entry("(negated) egress, 1 numeric", true, egress, 1, false),
 		// Adding >15 numeric ports requires more than one block.
-		Entry("(negated) ingress, 16 numeric", true, ingress, 16),
-		Entry("(negated) egress, 16 numeric", true, egress, 16),
+		Entry("(negated) ingress, 16 numeric", true, ingress, 16, false),
+		Entry("(negated) egress, 16 numeric", true, egress, 16, false),
+		Entry("(negated) egress, 16 numeric with a dest selector", true, egress, 16, true),
 	)
 })
