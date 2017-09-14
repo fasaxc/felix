@@ -21,6 +21,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/felix/hashutils"
+	"github.com/projectcalico/felix/ipsets"
 	"github.com/projectcalico/felix/iptables"
 	"github.com/projectcalico/felix/proto"
 )
@@ -163,10 +164,16 @@ func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVers
 	//
 	// Split the port list into blocks of 15, as per iptables limit and add in the number of
 	// named ports.
+	var ipSetConfig *ipsets.IPVersionConfig
+	if ipVersion == 4 {
+		ipSetConfig = r.IPSetConfigV4
+	} else {
+		ipSetConfig = r.IPSetConfigV6
+	}
 	srcPortSplits := SplitPortList(ruleCopy.SrcPorts)
 	if len(srcPortSplits)+len(ruleCopy.SrcNamedPortIpSetIds) > 1 {
 		// Render a block for the source ports.
-		matchBlockBuilder.AppendPortMatchBlock(ruleCopy.Protocol, srcPortSplits, ruleCopy.SrcNamedPortIpSetIds, src)
+		matchBlockBuilder.AppendPortMatchBlock(ipSetConfig, ruleCopy.Protocol, srcPortSplits, ruleCopy.SrcNamedPortIpSetIds, src)
 		// And remove them from the rule since they're already handled.
 		ruleCopy.SrcPorts = nil
 		ruleCopy.SrcNamedPortIpSetIds = nil
@@ -174,7 +181,7 @@ func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVers
 	dstPortSplits := SplitPortList(ruleCopy.DstPorts)
 	if len(dstPortSplits)+len(ruleCopy.DstNamedPortIpSetIds) > 1 {
 		// Render a block for the destination ports.
-		matchBlockBuilder.AppendPortMatchBlock(ruleCopy.Protocol, dstPortSplits, ruleCopy.DstNamedPortIpSetIds, dst)
+		matchBlockBuilder.AppendPortMatchBlock(ipSetConfig, ruleCopy.Protocol, dstPortSplits, ruleCopy.DstNamedPortIpSetIds, dst)
 		// And remove them from the rule since they're already handled.
 		ruleCopy.DstPorts = nil
 		ruleCopy.DstNamedPortIpSetIds = nil
@@ -270,6 +277,7 @@ type matchBlockBuilder struct {
 }
 
 func (r *matchBlockBuilder) AppendPortMatchBlock(
+	ipSetConfig *ipsets.IPVersionConfig,
 	protocol *proto.Protocol,
 	numericPortSplits [][]*proto.PortRange,
 	namedPortIPSetIDs []string,
@@ -296,8 +304,9 @@ func (r *matchBlockBuilder) AppendPortMatchBlock(
 	}
 
 	for _, namedPortIPSetID := range namedPortIPSetIDs {
+		ipsetName := ipSetConfig.NameForMainIPSet(namedPortIPSetID)
 		r.Rules = append(r.Rules, iptables.Rule{
-			Match:  srcOrDst.MatchIPPortIPSet(namedPortIPSetID),
+			Match:  srcOrDst.MatchIPPortIPSet(ipsetName),
 			Action: iptables.SetMarkAction{Mark: markToSet},
 		})
 	}
@@ -417,7 +426,7 @@ func (sod srcOrDst) MatchNet(cidr string) iptables.MatchCriteria {
 	return nil
 }
 
-func (sod srcOrDst) AppendMatchPorts(m  iptables.MatchCriteria, pr []*proto.PortRange) iptables.MatchCriteria {
+func (sod srcOrDst) AppendMatchPorts(m iptables.MatchCriteria, pr []*proto.PortRange) iptables.MatchCriteria {
 	switch sod {
 	case src:
 		return m.SourcePortRanges(pr)

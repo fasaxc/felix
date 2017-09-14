@@ -25,18 +25,19 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
+	. "github.com/onsi/ginkgo/extensions/table"
+
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/utils"
 	"github.com/projectcalico/felix/fv/workload"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
-	. "github.com/onsi/ginkgo/extensions/table"
 )
 
 var HaveConnectivityToPort = workload.HaveConnectivityToPort
 
-var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
+var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
 
 	var (
 		etcd   *containers.Container
@@ -168,7 +169,7 @@ var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloa
 		Expect(err).NotTo(HaveOccurred())
 	}
 
-	buildAllowToSharedPortPolicy := func(ie ingressEgress, numNumericPorts int) *api.Policy{
+	buildAllowToSharedPortPolicy := func(ie ingressEgress, numNumericPorts int) *api.Policy {
 		protoTCP := numorstring.ProtocolFromString("tcp")
 		policy := api.NewPolicy()
 		policy.Metadata.Name = "policy-1"
@@ -182,7 +183,7 @@ var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloa
 			Ports: ports,
 		}
 		apiRule := api.Rule{
-		Action:      "allow",
+			Action:      "allow",
 			Protocol:    &protoTCP,
 			Destination: entRule,
 		}
@@ -201,7 +202,7 @@ var _ = FContext("Named ports: with initialized Felix, etcd datastore, 3 workloa
 		return policy
 	}
 
-	FDescribeTable("with a named port policy allowing only traffic to the shared port",
+	DescribeTable("with a named port policy allowing only traffic to the shared port",
 		func(ie ingressEgress, numNumericPorts int) {
 			pol := buildAllowToSharedPortPolicy(ie, numNumericPorts)
 			createPolicy(pol)
