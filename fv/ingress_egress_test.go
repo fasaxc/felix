@@ -46,14 +46,13 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 		etcd = RunEtcd()
 
 		client = GetEtcdClient(etcd.IP)
-		err := client.EnsureInitialized()
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(client.EnsureInitialized, "10s", "1s").ShouldNot(HaveOccurred())
 
 		felix = RunFelix(etcd.IP)
 
 		felixNode := api.NewNode()
 		felixNode.Metadata.Name = felix.Hostname
-		_, err = client.Nodes().Create(felixNode)
+		_, err := client.Nodes().Create(felixNode)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Install a default profile that allows workloads with this profile to talk to each
@@ -121,8 +120,8 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 		})
 
 		It("only w1 can connect into w0, but egress from w0 is unrestricted", func() {
+			Eventually(w[2], "10s", "1s").ShouldNot(HaveConnectivityTo(w[0]))
 			Expect(w[1]).To(HaveConnectivityTo(w[0]))
-			Expect(w[2]).NotTo(HaveConnectivityTo(w[0]))
 			Expect(w[0]).To(HaveConnectivityTo(w[1]))
 			Expect(w[0]).To(HaveConnectivityTo(w[1]))
 		})
@@ -146,10 +145,10 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 		})
 
 		It("ingress to w0 is unrestricted, but w0 can only connect out to w1", func() {
+			Eventually(w[0], "10s", "1s").ShouldNot(HaveConnectivityTo(w[2]))
 			Expect(w[1]).To(HaveConnectivityTo(w[0]))
 			Expect(w[2]).To(HaveConnectivityTo(w[0]))
 			Expect(w[0]).To(HaveConnectivityTo(w[1]))
-			Expect(w[0]).NotTo(HaveConnectivityTo(w[2]))
 		})
 	})
 
@@ -172,8 +171,8 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 		})
 
 		It("only w1 can connect into w0, and all egress from w0 is denied", func() {
+			Eventually(w[2], "10s", "1s").ShouldNot(HaveConnectivityTo(w[0]))
 			Expect(w[1]).To(HaveConnectivityTo(w[0]))
-			Expect(w[2]).NotTo(HaveConnectivityTo(w[0]))
 			Expect(w[0]).NotTo(HaveConnectivityTo(w[1]))
 			Expect(w[0]).NotTo(HaveConnectivityTo(w[2]))
 		})
