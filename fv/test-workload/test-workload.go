@@ -20,9 +20,6 @@ import (
 	"strings"
 	"time"
 
-	"strings"
-	"time"
-
 	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/docopt/docopt-go"
 	log "github.com/sirupsen/logrus"

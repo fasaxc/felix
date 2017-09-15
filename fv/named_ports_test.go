@@ -35,8 +35,6 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 )
 
-var HaveConnectivityToPort = workload.HaveConnectivityToPort
-
 var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
 
 	var (
@@ -149,19 +147,25 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 	// Baseline test with no named ports policy.
 	Context("with no named port policy", func() {
 		It("should give full connectivity to and from workload 0", func() {
+			var cc = &workload.ConnectivityChecker{}
+
 			// Outbound, w0 should be able to reach all ports on w1 & w2
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], sharedPort))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[1], w1Port))
-			Eventually(w[0]).Should(HaveConnectivityToPort(w[2], w2Port))
+			cc.ExpectSome(w[0], w[1], sharedPort)
+			cc.ExpectSome(w[0], w[2], sharedPort)
+			cc.ExpectSome(w[0], w[1], w1Port)
+			cc.ExpectSome(w[0], w[2], w2Port)
+
+			cc.ExpectNone(w[0], w[2], 9999) // Not a port we open
 
 			// Inbound, w1 and w2 should be able to reach all ports on w0.
-			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], sharedPort))
-			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], sharedPort))
-			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], w0Port))
-			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], w0Port))
-			Eventually(w[1]).Should(HaveConnectivityToPort(w[0], 4000))
-			Eventually(w[2]).Should(HaveConnectivityToPort(w[0], 4000))
+			cc.ExpectSome(w[1], w[0], sharedPort)
+			cc.ExpectSome(w[2], w[0], sharedPort)
+			cc.ExpectSome(w[1], w[0], w0Port)
+			cc.ExpectSome(w[2], w[0], w0Port)
+			cc.ExpectSome(w[1], w[0], 4000)
+			cc.ExpectSome(w[2], w[0], 4000)
+
+			Eventually(cc.ActualConnectivity, "10s", "100ms").Should(Equal(cc.ExpectedConnectivity()))
 		})
 	})
 
@@ -244,7 +248,6 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 				} else {
 					cc.ExpectSome(w[1], w[0], 3000)
 				}
-
 			} else {
 				// Only traffic to listed ports is allowed.
 
@@ -267,12 +270,29 @@ var _ = Context("Named ports: with initialized Felix, etcd datastore, 3 workload
 				}
 			}
 
-			if useDestSel || (ingressOrEgress == egress && negated) {
-				cc.ExpectNone(w[1], w[2], sharedPort)
+			if ingressOrEgress == egress {
+				// When we render the policy at egress, we can piggy-back some additional tests
+				// on the connectivity between w[1] and w[2].
+				if useDestSel {
+					// We're limiting the destination to the w[0] pod so there should be no
+					// connectivity between w[1] and w[2].  Test a couple of sample paths:
+					cc.ExpectNone(w[1], w[2], sharedPort)
+					cc.ExpectNone(w[2], w[1], w1Port)
+				} else if negated {
+					// We're not using the destination selector but the port list is negated so
+					// we're explicitly excluding the shared port.
+					cc.ExpectNone(w[1], w[2], sharedPort)
+					cc.ExpectSome(w[1], w[2], w2Port)
+				} else {
+					// Positive policy with no destination selector, should allow the shared port.
+					cc.ExpectSome(w[1], w[2], sharedPort)
+					cc.ExpectNone(w[2], w[1], w1Port)
+				}
 			} else {
-				// Otherwise, w[1] should be able to reach w[2] either because the policy is only
-				// applied to w[0] or because the rule isn't limited to w[0] as destination.
-				cc.ExpectSome(w[1], w[2], sharedPort)
+				// Policy being applied at ingress on w[0], shouldn't affect w[1] <-> w[2]
+				// connectivity.
+				cc.ExpectSome(w[1], w[2], w2Port)
+				cc.ExpectSome(w[2], w[1], sharedPort)
 			}
 
 			// Outbound, w0 should be able to reach all ports on w1 & w2
