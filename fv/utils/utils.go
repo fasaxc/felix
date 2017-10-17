@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/libcalico-go/lib/api"
+	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/client"
 )
 
@@ -85,10 +85,10 @@ func Command(name string, args ...string) *exec.Cmd {
 }
 
 func GetEtcdClient(etcdIP string) *client.Client {
-	client, err := client.New(api.CalicoAPIConfig{
-		Spec: api.CalicoAPIConfigSpec{
-			DatastoreType: api.EtcdV2,
-			EtcdConfig: api.EtcdConfig{
+	client, err := client.New(apiconfig.CalicoAPIConfig{
+		Spec: apiconfig.CalicoAPIConfigSpec{
+			DatastoreType: apiconfig.EtcdV2,
+			EtcdConfig: apiconfig.EtcdConfig{
 				EtcdEndpoints: "http://" + etcdIP + ":2379",
 			},
 		},
