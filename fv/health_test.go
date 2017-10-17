@@ -56,7 +56,7 @@ import (
 
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/utils"
-	"github.com/projectcalico/libcalico-go/lib/api"
+	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	"github.com/projectcalico/libcalico-go/lib/health"
 )
@@ -180,10 +180,10 @@ var _ = BeforeSuite(func() {
 	}, "60s", "2s").ShouldNot(HaveOccurred())
 
 	Eventually(func() (err error) {
-		calicoClient, err = client.New(api.CalicoAPIConfig{
-			Spec: api.CalicoAPIConfigSpec{
-				DatastoreType: api.Kubernetes,
-				KubeConfig: api.KubeConfig{
+		calicoClient, err = client.New(apiconfig.CalicoAPIConfig{
+			Spec: apiconfig.CalicoAPIConfigSpec{
+				DatastoreType: apiconfig.Kubernetes,
+				KubeConfig: apiconfig.KubeConfig{
 					K8sAPIEndpoint:           k8sAPIEndpoint,
 					K8sInsecureSkipTLSVerify: true,
 				},
