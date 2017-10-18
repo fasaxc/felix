@@ -57,7 +57,7 @@ import (
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/utils"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
-	"github.com/projectcalico/libcalico-go/lib/client"
+	client "github.com/projectcalico/libcalico-go/lib/clientv2"
 	"github.com/projectcalico/libcalico-go/lib/health"
 )
 
@@ -73,7 +73,7 @@ var apiServerContainer *containers.Container
 var k8sAPIEndpoint string
 var badK8sAPIEndpoint string
 var k8sCertFilename string
-var calicoClient *client.Client
+var calicoClient client.Interface
 var k8sClient *kubernetes.Clientset
 
 var (

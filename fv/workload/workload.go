@@ -29,8 +29,8 @@ import (
 
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/utils"
-	api "github.com/projectcalico/libcalico-go/lib/apis/v1"
-	"github.com/projectcalico/libcalico-go/lib/client"
+	api "github.com/projectcalico/libcalico-go/lib/apis/v2"
+	client "github.com/projectcalico/libcalico-go/lib/clientv2"
 	"github.com/projectcalico/libcalico-go/lib/net"
 )
 
@@ -136,12 +136,12 @@ func Run(c *containers.Container, name, interfaceName, ip, ports string, protoco
 	log.WithField("workload", w).Info("Workload now running")
 
 	wep := api.NewWorkloadEndpoint()
-	wep.Metadata.Name = w.Name
-	wep.Metadata.Workload = w.Name
-	wep.Metadata.Orchestrator = "felixfv"
-	wep.Metadata.Node = w.C.Hostname
-	wep.Metadata.Labels = map[string]string{"name": w.Name}
-	wep.Spec.IPNetworks = []net.IPNet{net.MustParseNetwork(w.IP + "/32")}
+	wep.Name = w.Name
+	wep.Labels = map[string]string{"name": w.Name}
+	wep.Spec.Workload = w.Name
+	wep.Spec.Orchestrator = "felixfv"
+	wep.Spec.Node = w.C.Hostname
+	wep.Spec.IPNetworks = []string{w.IP + "/32"}
 	wep.Spec.InterfaceName = w.InterfaceName
 	wep.Spec.Profiles = []string{"default"}
 	w.WorkloadEndpoint = wep
@@ -154,8 +154,8 @@ func (w *Workload) IPNet() *net.IPNet {
 	return &ipNet
 }
 
-func (w *Workload) Configure(client *client.Client) {
-	_, err := client.WorkloadEndpoints().Apply(w.WorkloadEndpoint)
+func (w *Workload) Configure(client client.Interface) {
+	_, err := client.WorkloadEndpoints().Update(utils.Ctx, w.WorkloadEndpoint, utils.NoOptions)
 	Expect(err).NotTo(HaveOccurred())
 }
 
