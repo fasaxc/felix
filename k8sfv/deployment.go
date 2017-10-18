@@ -20,9 +20,9 @@ import (
 	"sync"
 
 	log "github.com/sirupsen/logrus"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	v1 "k8s.io/client-go/pkg/api/v1"
 )
 
 type host struct {

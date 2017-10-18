@@ -20,12 +20,10 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
+	"k8s.io/api/core/v1"
+	"k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api/v1"
-	"k8s.io/client-go/pkg/apis/extensions"
-
-	"github.com/projectcalico/felix/k8sfv/internalversion"
 )
 
 var nsPrefixNum = 0
@@ -101,23 +99,22 @@ func cleanupAllNamespaces(clientset *kubernetes.Clientset, nsPrefix string) {
 // Create a NetworkPolicy, for pods in the specified namespace, that allows ingress from other pods
 // in the same namespace.
 func createNetworkPolicy(clientset *kubernetes.Clientset, namespace string) {
-	npInterface := internalversion.NewNetworkPolicies(clientset.ExtensionsV1beta1Client, namespace)
-	np := extensions.NetworkPolicy{
+	np := v1beta1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,
 			Name:      "test-syncer-basic-net-policy",
 		},
-		Spec: extensions.NetworkPolicySpec{
+		Spec: v1beta1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{"calico/k8s_ns": namespace},
 			},
-			Ingress: []extensions.NetworkPolicyIngressRule{
-				extensions.NetworkPolicyIngressRule{
-					Ports: []extensions.NetworkPolicyPort{
-						extensions.NetworkPolicyPort{},
+			Ingress: []v1beta1.NetworkPolicyIngressRule{
+				v1beta1.NetworkPolicyIngressRule{
+					Ports: []v1beta1.NetworkPolicyPort{
+						v1beta1.NetworkPolicyPort{},
 					},
-					From: []extensions.NetworkPolicyPeer{
-						extensions.NetworkPolicyPeer{
+					From: []v1beta1.NetworkPolicyPeer{
+						v1beta1.NetworkPolicyPeer{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{
 									"calico/k8s_ns": namespace,
@@ -129,5 +126,5 @@ func createNetworkPolicy(clientset *kubernetes.Clientset, namespace string) {
 			},
 		},
 	}
-	npInterface.Create(&np)
+	clientset.NetworkPolicies().Create(&np)
 }

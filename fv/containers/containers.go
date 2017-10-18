@@ -29,7 +29,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/felix/fv/utils"
-	"github.com/projectcalico/libcalico-go/lib/api"
+	api "github.com/projectcalico/libcalico-go/lib/apis/v1"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
