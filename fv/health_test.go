@@ -226,7 +226,7 @@ var _ = Describe("health tests", func() {
 
 	createPerNodeConfig := func() {
 		// Make a k8s Node using the hostname of Felix's container.
-		_, err := k8sClient.Nodes().Create(&v1.Node{
+		_, err := k8sClient.CoreV1().Nodes().Create(&v1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: felixContainer.Hostname,
 			},
@@ -236,7 +236,7 @@ var _ = Describe("health tests", func() {
 	}
 
 	removePerNodeConfig := func() {
-		err := k8sClient.Nodes().Delete(felixContainer.Hostname, nil)
+		err := k8sClient.CoreV1().Nodes().Delete(felixContainer.Hostname, nil)
 		Expect(err).NotTo(HaveOccurred())
 	}
 
