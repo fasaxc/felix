@@ -158,7 +158,7 @@ func initialize(k8sServerEndpoint string) (clientset *kubernetes.Clientset) {
 
 func initializeCalicoDeployment(k8sServerEndpoint string) {
 	// Create client into the Kubernetes datastore.
-	c, err := client.New(apiconfig.CalicoAPIConfig{
+	_, err := client.New(apiconfig.CalicoAPIConfig{
 		Spec: apiconfig.CalicoAPIConfigSpec{
 			DatastoreType: apiconfig.Kubernetes,
 			KubeConfig: apiconfig.KubeConfig{
@@ -167,12 +167,6 @@ func initializeCalicoDeployment(k8sServerEndpoint string) {
 			},
 		},
 	})
-	if err != nil {
-		panic(err)
-	}
-
-	// Establish the other global config that Calico requires.
-	err = c.EnsureInitialized()
 	if err != nil {
 		panic(err)
 	}
