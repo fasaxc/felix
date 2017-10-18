@@ -136,11 +136,11 @@ func Run(c *containers.Container, name, interfaceName, ip, ports string, protoco
 	log.WithField("workload", w).Info("Workload now running")
 
 	wep := api.NewWorkloadEndpoint()
-	wep.Name = w.Name
 	wep.Labels = map[string]string{"name": w.Name}
-	wep.Spec.Workload = w.Name
-	wep.Spec.Orchestrator = "felixfv"
 	wep.Spec.Node = w.C.Hostname
+	wep.Spec.Orchestrator = "felixfv"
+	wep.Spec.Workload = w.Name
+	wep.Spec.Endpoint = w.Name
 	wep.Spec.IPNetworks = []string{w.IP + "/32"}
 	wep.Spec.InterfaceName = w.InterfaceName
 	wep.Spec.Profiles = []string{"default"}
@@ -155,7 +155,13 @@ func (w *Workload) IPNet() *net.IPNet {
 }
 
 func (w *Workload) Configure(client client.Interface) {
-	_, err := client.WorkloadEndpoints().Update(utils.Ctx, w.WorkloadEndpoint, utils.NoOptions)
+	wep := w.WorkloadEndpoint
+	wep.Namespace = "fv"
+	wep.Name = strings.Replace(wep.Spec.Node, "-", "--", -1) +
+		"-" + strings.Replace(wep.Spec.Orchestrator, "-", "--", -1) +
+		"-" + strings.Replace(wep.Spec.Workload, "-", "--", -1) +
+		"-" + strings.Replace(wep.Spec.Endpoint, "-", "--", -1)
+	_, err := client.WorkloadEndpoints().Create(utils.Ctx, w.WorkloadEndpoint, utils.NoOptions)
 	Expect(err).NotTo(HaveOccurred())
 }
 
