@@ -123,6 +123,7 @@ var _ = Context("with initialized Felix and etcd datastore", func() {
 
 			BeforeEach(func() {
 				policy := api.NewNetworkPolicy()
+				policy.Namespace = "fv"
 				policy.Name = "pre-dnat-policy-1"
 				policy.Spec.PreDNAT = true
 				//policy.Spec.ApplyOnForward = true

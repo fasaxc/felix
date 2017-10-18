@@ -213,6 +213,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 		// useDestSel if set, adds a destination selector (picking out w[0]) to the rule.
 		func(negated bool, applyRulesAt ingressEgress, numNumericPorts int, useDestSel bool) {
 			pol := api.NewNetworkPolicy()
+			pol.Namespace = "fv"
 			pol.Name = "policy-1"
 			ports := []numorstring.Port{
 				numorstring.NamedPort(sharedPortName),
@@ -384,6 +385,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 
 		BeforeEach(func() {
 			policy = api.NewNetworkPolicy()
+			policy.Namespace = "fv"
 			policy.Name = "policy-1"
 
 			entityRule := api.EntityRule{
@@ -745,6 +747,7 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 
 		// Create a default deny policy (but we don't actually write it to the datastore yet).
 		defaultDenyPolicy = api.NewNetworkPolicy()
+		defaultDenyPolicy.Namespace = "fv"
 		defaultDenyPolicy.Name = "knp.default.test.default-deny"
 		thousand := 1000.0
 		defaultDenyPolicy.Spec.Order = &thousand
@@ -754,6 +757,7 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 		// Create a policy that opens up the HTTP named port (but we don't actually write it to the
 		// datastore yet).
 		allowHTTPPolicy = api.NewNetworkPolicy()
+		allowHTTPPolicy.Namespace = "fv"
 		allowHTTPPolicy.Name = "knp.default.test.access-nginx"
 		protoStruct := numorstring.ProtocolFromString("tcp")
 		apiRule := api.Rule{
@@ -892,6 +896,7 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 
 		// Create a policy that tries to open up the TCP named port over UDP and vice/versa.
 		allowConfusedProtocolPolicy = api.NewNetworkPolicy()
+		allowConfusedProtocolPolicy.Namespace = "fv"
 		allowConfusedProtocolPolicy.Name = "knp.default.test.confused"
 		protoUDPStruct := numorstring.ProtocolFromString("udp")
 		protoTCPStruct := numorstring.ProtocolFromString("tcp")

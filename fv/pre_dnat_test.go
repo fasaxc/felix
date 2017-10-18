@@ -123,6 +123,7 @@ var _ = Context("with initialized Felix, etcd datastore, 2 workloads", func() {
 
 			BeforeEach(func() {
 				policy := api.NewNetworkPolicy()
+				policy.Namespace = "fv"
 				policy.Name = "deny-ingress"
 				order := float64(20)
 				policy.Spec.Order = &order
@@ -155,6 +156,7 @@ var _ = Context("with initialized Felix, etcd datastore, 2 workloads", func() {
 
 				BeforeEach(func() {
 					policy := api.NewNetworkPolicy()
+					policy.Namespace = "fv"
 					policy.Name = "allow-ingress-32010"
 					order := float64(10)
 					policy.Spec.Order = &order
@@ -188,6 +190,7 @@ var _ = Context("with initialized Felix, etcd datastore, 2 workloads", func() {
 
 				BeforeEach(func() {
 					policy := api.NewNetworkPolicy()
+					policy.Namespace = "fv"
 					policy.Name = "allow-ingress-8055"
 					order := float64(10)
 					policy.Spec.Order = &order

@@ -94,6 +94,7 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 
 		BeforeEach(func() {
 			policy := api.NewNetworkPolicy()
+			policy.Namespace = "fv"
 			policy.Name = "policy-1"
 			allowFromW1 := api.Rule{
 				Action: "allow",
@@ -119,6 +120,7 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 
 		BeforeEach(func() {
 			policy := api.NewNetworkPolicy()
+			policy.Namespace = "fv"
 			policy.Name = "policy-1"
 			allowToW1 := api.Rule{
 				Action: "allow",
@@ -144,6 +146,7 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 
 		BeforeEach(func() {
 			policy := api.NewNetworkPolicy()
+			policy.Namespace = "fv"
 			policy.Name = "policy-1"
 			allowFromW1 := api.Rule{
 				Action: "allow",
@@ -171,6 +174,7 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 
 		BeforeEach(func() {
 			policy = api.NewNetworkPolicy()
+			policy.Namespace = "fv"
 			policy.Name = "policy-1"
 			allowFromW1 := api.Rule{
 				Action: "allow",
