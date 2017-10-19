@@ -126,7 +126,7 @@ var _ = Context("with initialized Felix and etcd datastore", func() {
 				policy.Namespace = "fv"
 				policy.Name = "pre-dnat-policy-1"
 				policy.Spec.PreDNAT = true
-				//policy.Spec.ApplyOnForward = true
+				policy.Spec.ApplyOnForward = true
 				protocol := numorstring.ProtocolFromString("tcp")
 				allowMetricsPortRule := api.Rule{
 					Action:   "allow",
