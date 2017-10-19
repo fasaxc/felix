@@ -53,6 +53,7 @@ import (
 	"github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/felix/statusrep"
 	"github.com/projectcalico/felix/usagerep"
+	apiv2 "github.com/projectcalico/libcalico-go/lib/apis/v2"
 	"github.com/projectcalico/libcalico-go/lib/backend"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
@@ -661,7 +662,7 @@ func loadConfigFromDatastore(ctx context.Context, datastore bapi.Client, hostnam
 		//}
 
 		log.Info("Loading global config from datastore")
-		kvl, err := datastore.List(ctx, model.GlobalConfigListOptions{}, "")
+		kvl, err := datastore.List(ctx, model.ResourceListOptions{Kind: apiv2.KindFelixConfiguration, Name: "default"}, "")
 		if err != nil {
 			log.WithError(err).Error("Failed to load config from datastore")
 			time.Sleep(1 * time.Second)
@@ -676,7 +677,7 @@ func loadConfigFromDatastore(ctx context.Context, datastore bapi.Client, hostnam
 
 		log.Infof("Loading per-host config from datastore; hostname=%v", hostname)
 		kvl, err = datastore.List(ctx,
-			model.HostConfigListOptions{Hostname: hostname}, "")
+			model.ResourceListOptions{Kind: apiv2.KindFelixConfiguration, Name: "node." + hostname}, "")
 		if err != nil {
 			log.WithError(err).Error("Failed to load config from datastore")
 			time.Sleep(1 * time.Second)
