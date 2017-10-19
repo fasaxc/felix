@@ -53,14 +53,13 @@ import (
 	"github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/felix/statusrep"
 	"github.com/projectcalico/felix/usagerep"
+	apiv2 "github.com/projectcalico/libcalico-go/lib/apis/v2"
 	"github.com/projectcalico/libcalico-go/lib/backend"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/backend/syncersv1/updateprocessors"
-	"github.com/projectcalico/libcalico-go/lib/clientv2"
 	errors2 "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/health"
-	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/projectcalico/typha/pkg/syncclient"
 )
 
@@ -148,7 +147,6 @@ func main() {
 	// datastore and merge. Keep retrying on failure.  We'll sit in this
 	// loop until the datastore is ready.
 	log.Infof("Loading configuration...")
-	var v2Client clientv2.Interface
 	var backendClient bapi.Client
 	var configParams *config.Config
 	var typhaAddr string
@@ -186,20 +184,14 @@ configRetry:
 		// We should now have enough config to connect to the datastore
 		// so we can load the remainder of the config.
 		datastoreConfig := configParams.DatastoreConfig()
-		v2Client, err = clientv2.New(datastoreConfig)
+		backendClient, err = backend.NewClient(datastoreConfig)
 		if err != nil {
-			log.WithError(err).Error("Failed to connect to datastore (v2 client)")
+			log.WithError(err).Error("Failed to create datastore client")
 			time.Sleep(1 * time.Second)
 			continue configRetry
 		}
-		// We can't cast the returned clientv2.Interface to clientv2.client because that type is
-		// private but we need access to it's deliberately-exported Backend() method to get hold
-		// of the backend syncer API.
-		backendClient = v2Client.(interface {
-			Backend() bapi.Client
-		}).Backend()
 		globalConfig, hostConfig, err := loadConfigFromDatastore(
-			ctx, v2Client, configParams.FelixHostname)
+			ctx, backendClient, configParams.FelixHostname)
 		if err != nil {
 			log.WithError(err).Error("Failed to get config from datastore")
 			time.Sleep(1 * time.Second)
@@ -663,30 +655,34 @@ func monitorAndManageShutdown(failureReportChan <-chan string, driverCmd *exec.C
 	logCxt.Fatal("Exiting immediately")
 }
 
-func convertConfig(v2Config interface{}) (map[string]string, error) {
-	if v2Config == nil || reflect.ValueOf(v2Config).IsNil() {
+func convertConfig(v2Config *model.KVPair) (map[string]string, error) {
+	if v2Config == nil {
 		return nil, nil
 	}
 	c := map[string]string{}
 	configConvertor := updateprocessors.NewFelixConfigUpdateProcessor()
-	v2KV := model.KVPair{
-		Key:   model.ResourceKey{Name: "default"},
-		Value: v2Config,
-	}
-	v1kvs, err := configConvertor.Process(&v2KV)
+	v1kvs, err := configConvertor.Process(v2Config)
 	if err != nil {
 		log.WithError(err).Error("Failed to convert configuration")
 	}
 	for _, v1KV := range v1kvs {
 		if v1KV.Value != nil {
-			c[v1KV.Key.(model.GlobalConfigKey).Name] = *(v1KV.Value.(*string))
+			switch k := v1KV.Key.(type) {
+			case model.GlobalConfigKey:
+				c[k.Name] = *(v1KV.Value.(*string))
+			case model.HostConfigKey:
+				c[k.Name] = *(v1KV.Value.(*string))
+			default:
+				log.WithField("KV", v1KV).Warn("Skipping config of unknown KV type.")
+			}
+
 		}
 	}
 	return c, nil
 }
 
 func loadConfigFromDatastore(
-	ctx context.Context, client clientv2.Interface, hostname string,
+	ctx context.Context, client bapi.Client, hostname string,
 ) (globalConfig, hostConfig map[string]string, err error) {
 
 	//log.Info("Waiting for the datastore to be ready")
@@ -700,15 +696,27 @@ func loadConfigFromDatastore(
 	//	continue
 	//}
 
-	g, err := client.FelixConfigurations().Get(ctx, "default", options.GetOptions{})
+	g, err := client.Get(ctx, model.ResourceKey{
+		Kind:      apiv2.KindFelixConfiguration,
+		Name:      "default",
+		Namespace: "",
+	}, "")
 	if _, ok := err.(errors2.ErrorResourceDoesNotExist); err != nil && !ok {
 		return
 	}
-	h, err := client.FelixConfigurations().Get(ctx, "default", options.GetOptions{})
+	h, err := client.Get(ctx, model.ResourceKey{
+		Kind:      apiv2.KindFelixConfiguration,
+		Name:      "node." + hostname,
+		Namespace: "",
+	}, "")
 	if _, ok := err.(errors2.ErrorResourceDoesNotExist); err != nil && !ok {
 		return
 	}
-	ci, err := client.ClusterInformation().Get(ctx, "default", options.GetOptions{})
+	ci, err := client.Get(ctx, model.ResourceKey{
+		Kind:      apiv2.KindClusterInformation,
+		Name:      "node." + hostname,
+		Namespace: "",
+	}, "")
 	if _, ok := err.(errors2.ErrorResourceDoesNotExist); err != nil && !ok {
 		return
 	}
