@@ -284,7 +284,7 @@ var _ = Describe("health tests", func() {
 
 			It("should become unready, then die", func() {
 				Eventually(felixReady, "120s", "10s").ShouldNot(BeGood())
-				Eventually(felixContainer.Stopped, "5s").Should(BeTrue())
+				Eventually(felixContainer.Stopped, "60s", "1s").Should(BeTrue())
 			})
 		})
 
