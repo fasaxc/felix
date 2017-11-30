@@ -22,8 +22,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	hns "github.com/Microsoft/hcsshim"
 	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/felix/dataplane-drivers/windataplane/set"
 	"github.com/projectcalico/felix/dataplane-drivers/windataplane/ipsets"
+	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
 // PolicySets manages a whole plane of policies/profiles

@@ -20,7 +20,7 @@ import (
 	"errors"
 
 	hns "github.com/Microsoft/hcsshim"
-	"github.com/projectcalico/felix/dataplane-drivers/windataplane/set"
+	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
 const (

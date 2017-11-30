@@ -112,7 +112,6 @@ func (m *endpointManager) RefreshHnsEndpointCache(forceRefresh bool) error {
 	if (!forceRefresh && (time.Since(m.lastCacheUpdate) < cacheTimeout)) {
 		return nil
 	}
-
 	log.Info("Refreshing the endpoint cache")
 	endpoints, err := hns.HNSListEndpointRequest()
 	if err != nil {
