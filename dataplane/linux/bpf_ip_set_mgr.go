@@ -184,7 +184,6 @@ func (m *bpfIPSetManager) CompleteDeferredWork() error {
 			ipSet.PendingRemoves.Clear()
 		}
 
-		var unknownEntries []ipsets.IPSetEntry
 		err := m.bpfMap.Iter(func(k, v []byte) bpf.IteratorAction {
 			var entry ipsets.IPSetEntry
 			copy(entry[:], k)
@@ -196,14 +195,17 @@ func (m *bpfIPSetManager) CompleteDeferredWork() error {
 			}
 			ipSet := m.ipSets[setID]
 			if ipSet == nil {
-				// Found en entry from an unknown IP set.  Mark it for deletion at the end.
-				unknownEntries = append(unknownEntries, entry)
+				log.WithField("entry", entry).Debug("Found entry from unknown IP set. Delete.")
+				return bpf.IterDelete
 			} else {
 				// Entry is from a known IP set.  Check if the entry is wanted.
 				if ipSet.DesiredEntries.Contains(entry) {
+					log.WithField("entry", entry).Debug("Entry we were about to add, clean up pending set.")
 					ipSet.PendingAdds.Discard(entry)
 				} else {
-					ipSet.PendingRemoves.Add(entry)
+					log.WithField("entry", entry).Debug("Entry we don't want. Delete.")
+					ipSet.PendingRemoves.Discard(entry)
+					return bpf.IterDelete
 				}
 			}
 			return bpf.IterNone
@@ -212,12 +214,6 @@ func (m *bpfIPSetManager) CompleteDeferredWork() error {
 			log.WithError(err).Error("Failed to iterate over BPF map; IP sets may be out of sync")
 			m.resyncScheduled = true
 			return err
-		}
-
-		for _, entry := range unknownEntries {
-			err := m.bpfMap.Delete(entry[:])
-			log.WithError(err).Error("Failed to remove unexpected IP set entry")
-			m.resyncScheduled = true
 		}
 
 		for _, ipSet := range m.ipSets {
