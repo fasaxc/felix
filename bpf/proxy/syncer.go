@@ -734,8 +734,13 @@ func (s *Syncer) Apply(state DPSyncerState) error {
 		s.stickyEps = nil
 	}()
 
+	log.Info("Apply waiting on mapsLock...")
 	s.mapsLck.Lock()
-	defer s.mapsLck.Unlock()
+	log.Info("Apply acquired mapsLock...")
+	defer func() {
+		s.mapsLck.Unlock()
+		log.Info("Apply released mapsLock...")
+	}()
 
 	if err := s.apply(state); err != nil {
 		// dont bother to cleanup affinity since we do not know in what state we
@@ -818,6 +823,13 @@ func (s *Syncer) newSvc(sname k8sp.ServicePortName, sinfo k8sp.ServicePort, id u
 }
 
 func (s *Syncer) writeSvcBackend(svcID uint32, idx uint32, ep k8sp.Endpoint) error {
+	port, _ := ep.Port()
+	log.WithFields(log.Fields{
+		"IP": ep.IP(),
+		"port": port,
+		"svcID": svcID,
+		"idx":idx,
+	}).Info("Writing backend to map")
 	ip := net.ParseIP(ep.IP())
 
 	key := nat.NewNATBackendKey(svcID, uint32(idx))
@@ -929,6 +941,14 @@ func (s *Syncer) writeLBSrcRangeSvcNATKeys(svc k8sp.ServicePort, svcID uint32, c
 }
 
 func (s *Syncer) writeSvc(svc k8sp.ServicePort, svcID uint32, count, local int) error {
+
+	log.WithFields(log.Fields{
+		"IP":svc.ClusterIP(),
+		"port":svc.Port(),
+		"svcID":svcID,
+		"count": count,
+		"local": local,
+	}).Info("Writing frontend to map")
 	key, err := getSvcNATKey(svc)
 	if err != nil {
 		return err
@@ -1144,11 +1164,15 @@ func (s *Syncer) runExpandNPFixup(misses []*expandMiss) {
 
 	// start the fixer routine and exit
 	go func() {
-		log.Debug("fixer started")
+		log.Info("Fixer started")
 		defer s.expFixupWg.Done()
-		defer log.Debug("fixer exited")
+		defer log.Info("Fixer exited")
 		s.mapsLck.Lock()
-		defer s.mapsLck.Unlock()
+		log.Info("Fixer acquired mapsLock")
+		defer func() {
+			s.mapsLck.Unlock()
+			log.Info("Fixer released mapsLock")
+		}()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -1288,7 +1312,9 @@ func (s *Syncer) ConntrackFrontendHasBackend(ip net.IP, port uint16,
 // ConntrackScanStart excludes Apply from running and builds the active maps from
 // ConntrackFrontendHasBackend
 func (s *Syncer) ConntrackScanStart() {
+	log.Info("Waiting for mapsLock for conntrack scan...")
 	s.mapsLck.Lock()
+	log.Info("Acquired mapsLock...")
 
 	s.activeSvcsMap = make(map[ipPortProto]uint32)
 	s.activeEpsMap = make(map[uint32]map[ipPort]struct{})
@@ -1313,6 +1339,7 @@ func (s *Syncer) ConntrackScanEnd() {
 	s.activeSvcsMap = nil
 	s.activeEpsMap = nil
 	s.mapsLck.Unlock()
+	log.Info("Released mapsLock.")
 }
 
 func serviceInfoFromK8sServicePort(sport k8sp.ServicePort) *serviceInfo {

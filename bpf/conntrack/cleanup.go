@@ -89,6 +89,7 @@ func NewScanner(ctMap bpf.Map, scanners ...EntryScanner) *Scanner {
 
 // Scan executes a scanning iteration
 func (s *Scanner) Scan() {
+	log.Info("Doing conntrack scan.")
 	debug := log.GetLevel() >= log.DebugLevel
 
 	var ctKey Key
@@ -119,6 +120,7 @@ func (s *Scanner) Scan() {
 	if err != nil {
 		log.WithError(err).Warn("Failed to iterate over conntrack map")
 	}
+	log.Info("Completed conntrack scan.")
 }
 
 func (s *Scanner) get(k Key) (Value, error) {
