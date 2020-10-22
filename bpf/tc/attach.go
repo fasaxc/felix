@@ -165,7 +165,7 @@ func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
 	// filter protocol all pref 49152 bpf chain 0 handle 0x1 to_hep_no_log.o:[calico_to_host_ep] direct-action not_in_hw id 821 tag ee402594f8f85ac3 jited
 	var progsToClean []attachedProg
 	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.Contains(line, "calico") {
+		if !strings.Contains(line, "direct-action") {
 			continue
 		}
 		// find the pref and the handle
