@@ -1160,6 +1160,20 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 			Action: iptables.JumpAction{Target: rules.ChainRawPrerouting},
 		}})
 	}
+	for _, t := range d.iptablesMangleTables {
+		// Workaround: GKE CNI clobbers our mark bits by doing a CONNMARK restore.  Work around that by saving
+		// out mark bits to the CONNMARK first!
+		t.InsertOrAppendRules("PREROUTING", []iptables.Rule{{
+			Action: iptables.SaveConnMarkAction{
+				SaveMask: tc.MarksMask,
+			},
+		}})
+		t.AppendRules("PREROUTING", []iptables.Rule{{
+			Action: iptables.SetConnMarkAction{
+				Mask: tc.MarksMask,
+			},
+		}})
+	}
 }
 
 func (d *InternalDataplane) setUpIptablesNormal() {
