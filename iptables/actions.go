@@ -243,7 +243,7 @@ func (c SaveConnMarkAction) ToFragment(features *Features) string {
 	} else {
 		mask = c.SaveMask
 	}
-	return fmt.Sprintf("--jump CONNMARK --save-mark --mark %#x", mask)
+	return fmt.Sprintf("--jump CONNMARK --save-mark --ctmask %#x", mask)
 }
 
 func (c SaveConnMarkAction) String() string {
