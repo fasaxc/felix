@@ -31,12 +31,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/jitter"
 )
 
 type AttachPoint struct {
@@ -86,7 +88,7 @@ func (ap AttachPoint) AttachProgram() error {
 	defer tcLock.RUnlock()
 	logCxt.Debug("AttachProgram got lock.")
 
-	progsToClean, err := ap.listAttachedPrograms()
+	progsToClean, err := ap.listAttachedPrograms("calico")
 	if err != nil {
 		return err
 	}
@@ -156,7 +158,30 @@ type attachedProg struct {
 	handle string
 }
 
-func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
+func (ap AttachPoint) Monitor() {
+	log.WithField("iface", ap.Iface).Info("Monitoring programs")
+	t := jitter.NewTicker(time.Second, time.Millisecond*100)
+	defer t.Stop()
+	for range t.Channel() {
+		progsToClean, err := ap.listAttachedPrograms("bpf_")
+		if err != nil {
+			log.WithError(err).Warn("Failed to list programs, assuming interface gone")
+			return
+		}
+		for _, p := range progsToClean {
+			log.WithField("prog", p).Debug("Cleaning up old program")
+			_, err = ExecTC("filter", "del", "dev", ap.Iface, string(ap.Hook), "pref", p.pref, "handle", p.handle, "bpf")
+			if err == ErrDeviceNotFound {
+				continue
+			}
+			if err != nil {
+				log.WithError(err).WithField("prog", p).Warn("Failed to clean up old  program.")
+			}
+		}
+	}
+}
+
+func (ap AttachPoint) listAttachedPrograms(pattern string) ([]attachedProg, error) {
 	out, err := ExecTC("filter", "show", "dev", ap.Iface, string(ap.Hook))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tc filters on interface: %w", err)
@@ -165,7 +190,7 @@ func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
 	// filter protocol all pref 49152 bpf chain 0 handle 0x1 to_hep_no_log.o:[calico_to_host_ep] direct-action not_in_hw id 821 tag ee402594f8f85ac3 jited
 	var progsToClean []attachedProg
 	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.Contains(line, "direct-action") {
+		if !strings.Contains(line, pattern) {
 			continue
 		}
 		// find the pref and the handle
@@ -222,7 +247,7 @@ func (ap AttachPoint) IsAttached() (bool, error) {
 	if !hasQ {
 		return false, nil
 	}
-	progs, err := ap.listAttachedPrograms()
+	progs, err := ap.listAttachedPrograms("calico")
 	if err != nil {
 		return false, err
 	}

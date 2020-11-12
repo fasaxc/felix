@@ -720,6 +720,7 @@ func (m *bpfEndpointManager) attachWorkloadProgram(ifaceName string, endpoint *p
 		if err != nil {
 			return err
 		}
+		go ap.Monitor()
 
 		jumpMapFD, err = FindJumpMap(ap)
 		if err != nil {
@@ -861,7 +862,11 @@ func (m *bpfEndpointManager) attachDataIfaceProgram(ifaceName string, polDirecti
 	ap := m.calculateTCAttachPoint(epType, polDirection, ifaceName)
 	ap.HostIP = m.hostIP
 	ap.TunnelMTU = uint16(m.vxlanMTU)
-	return ap.AttachProgram()
+	err := ap.AttachProgram()
+	if err == nil {
+		go ap.Monitor()
+	}
+	return err
 }
 
 // PolDirection is the Calico datamodel direction of policy.  On a host endpoint, ingress is towards the host.
