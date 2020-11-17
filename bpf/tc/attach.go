@@ -34,6 +34,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 
 	"github.com/projectcalico/libcalico-go/lib/set"
 
@@ -120,6 +121,18 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	return nil
+}
+
+func findVethNS(vethName string) (interface{}, error) {
+	link, err := netlink.LinkByName(vethName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up veth %s: %w", vethName, err)
+	}
+	if link.Type() != "veth" {
+		return nil, fmt.Errorf("%s is not a veth", vethName)
+	}
+	veth := link.(*netlink.Veth)
+	veth.NetNsID
 }
 
 func ExecTC(args ...string) (out string, err error) {
