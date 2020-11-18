@@ -701,7 +701,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		goto skip_policy;
 	}
 
-	if (CALI_F_FROM_WEP) {
+	if (CALI_F_FROM_WEP && false) {
 		/* Do RPF check since it's our responsibility to police that. */
 		CALI_DEBUG("Workload RPF check src=%x skb iface=%d.\n",
 				be32_to_host(state->ip_src), skb->ifindex);

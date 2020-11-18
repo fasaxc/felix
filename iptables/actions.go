@@ -271,8 +271,8 @@ func (c RestoreConnMarkAction) String() string {
 }
 
 type SetConnMarkAction struct {
-	Mask     uint32
-	Mark     uint32
+	Mask         uint32
+	Mark         uint32
 	TypeConnMark struct{}
 }
 

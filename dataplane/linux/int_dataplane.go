@@ -1050,14 +1050,14 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 
 		var inputRules []iptables.Rule
 		for _, prefix := range d.config.RulesConfig.WorkloadIfacePrefixes {
-			fwdRules = append(fwdRules,
-				// Drop packets that have come from a workload but have not been through our BPF program.
-				iptables.Rule{
-					Match:   iptables.Match().InInterface(prefix+"+").NotMarkMatchesWithMask(tc.MarkSeen, tc.MarkSeenMask),
-					Action:  iptables.DropAction{},
-					Comment: []string{"From workload without BPF seen mark"},
-				},
-			)
+			// fwdRules = append(fwdRules,
+			// 	// Drop packets that have come from a workload but have not been through our BPF program.
+			// 	iptables.Rule{
+			// 		Match:   iptables.Match().InInterface(prefix+"+").NotMarkMatchesWithMask(tc.MarkSeen, tc.MarkSeenMask),
+			// 		Action:  iptables.DropAction{},
+			// 		Comment: []string{"From workload without BPF seen mark"},
+			// 	},
+			// )
 
 			if d.config.RulesConfig.EndpointToHostAction == "ACCEPT" {
 				// Only need to worry about ACCEPT here.  Drop gets compiled into the BPF program and

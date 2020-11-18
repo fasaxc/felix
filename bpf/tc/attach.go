@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Copyright (c) 2020  All rights reserved.
-
 package tc
 
 import (
@@ -34,7 +32,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/vishvananda/netlink"
 
 	"github.com/projectcalico/libcalico-go/lib/set"
 
@@ -53,6 +50,7 @@ type AttachPoint struct {
 	ToHostDrop bool
 	DSR        bool
 	TunnelMTU  uint16
+	LogPrefix  string
 }
 
 var tcLock sync.RWMutex
@@ -121,18 +119,6 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	return nil
-}
-
-func findVethNS(vethName string) (interface{}, error) {
-	link, err := netlink.LinkByName(vethName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to look up veth %s: %w", vethName, err)
-	}
-	if link.Type() != "veth" {
-		return nil, fmt.Errorf("%s is not a veth", vethName)
-	}
-	veth := link.(*netlink.Veth)
-	veth.NetNsID
 }
 
 func ExecTC(args ...string) (out string, err error) {
@@ -231,7 +217,12 @@ func (ap AttachPoint) patchBinary(logCtx *log.Entry, ifile, ofile string) error 
 		return fmt.Errorf("failed to patch IPv4 into BPF binary: %w", err)
 	}
 
-	b.PatchLogPrefix(ap.Iface)
+	if ap.LogPrefix != "" {
+		b.PatchLogPrefix(ap.LogPrefix)
+	} else {
+
+		b.PatchLogPrefix(ap.Iface)
+	}
 	b.PatchTunnelMTU(ap.TunnelMTU)
 
 	err = b.WriteToFile(ofile)

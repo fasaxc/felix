@@ -31,6 +31,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/sys/unix"
 
@@ -42,6 +44,7 @@ import (
 	"github.com/projectcalico/felix/idalloc"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/iptables"
+	calinetns "github.com/projectcalico/felix/netns"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/ratelimited"
 )
@@ -626,7 +629,9 @@ func (m *bpfEndpointManager) applyPolicy(ifaceName string) error {
 	// get the jump map ready to insert the policy if the endpoint shows up.
 
 	// Attach the qdisc first; it is shared between the directions.
-	err := tc.EnsureQdisc(ifaceName)
+	err := inPeerNS(ifaceName, func() error {
+		return tc.EnsureQdisc("eth0")
+	})
 	if err != nil {
 		if errors.Is(err, tc.ErrDeviceNotFound) {
 			// Interface is gone, nothing to do.
@@ -670,7 +675,13 @@ func (m *bpfEndpointManager) applyPolicy(ifaceName string) error {
 var calicoRouterIP = net.IPv4(169, 254, 1, 1).To4()
 
 func (m *bpfEndpointManager) attachWorkloadProgram(ifaceName string, endpoint *proto.WorkloadEndpoint, polDirection PolDirection) error {
-	ap := m.calculateTCAttachPoint(tc.EpTypeWorkload, polDirection, ifaceName)
+	peerName, err := lookupPeerVethName(ifaceName)
+	if err != nil {
+		return err
+	}
+
+	ap := m.calculateTCAttachPoint(tc.EpTypeWorkload, polDirection, peerName)
+	ap.LogPrefix = ifaceName
 	// Host side of the veth is always configured as 169.254.1.1.
 	ap.HostIP = calicoRouterIP
 	// * VXLAN MTU should be the host ifaces MTU -50, in order to allow space for VXLAN.
@@ -715,21 +726,68 @@ func (m *bpfEndpointManager) attachWorkloadProgram(ifaceName string, endpoint *p
 	}
 
 	if jumpMapFD == 0 {
-		// We don't have a program attached to this interface yet, attach one now.
-		err := ap.AttachProgram()
+		err := inPeerNS(ifaceName, func() error {
+			// We don't have a program attached to this interface yet, attach one now.
+			err = ap.AttachProgram()
+			if err != nil {
+				return err
+			}
+			go ap.Monitor()
+
+			jumpMapFD, err = FindJumpMap(ap)
+			if err != nil {
+				return fmt.Errorf("failed to look up jump map: %w", err)
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
-		go ap.Monitor()
 
-		jumpMapFD, err = FindJumpMap(ap)
-		if err != nil {
-			return fmt.Errorf("failed to look up jump map: %w", err)
-		}
 		m.setJumpMapFD(ifaceName, polDirection, jumpMapFD)
 	}
 
 	return m.updatePolicyProgram(jumpMapFD, rules)
+}
+
+func inPeerNS(ifaceName string, fn func() error) error {
+	netnsCache, err := calinetns.ListNetNSIDs()
+	if err != nil {
+		return err
+	}
+	defer netnsCache.Close()
+
+	rootNS, err := netns.Get()
+	if err != nil {
+		return err
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	inPeerNS := false
+	defer func() {
+		if !inPeerNS {
+			return
+		}
+		netns.Set(rootNS)
+	}()
+
+	hostSideVeth, err := netlink.LinkByName(ifaceName)
+	if err != nil {
+		return err
+	}
+	peerNetNSID := hostSideVeth.Attrs().NetNsID
+	peerNS, err := netnsCache.NetNSHandleByID(peerNetNSID)
+	if err != nil {
+		return err
+	}
+	netns.Set(peerNS)
+	inPeerNS = true
+
+	return fn()
+}
+
+func lookupPeerVethName(name string) (string, error) {
+	return "eth0", nil // TODO
 }
 
 func (m *bpfEndpointManager) getJumpMapFD(ifaceName string, direction PolDirection) (fd bpf.MapFD) {
@@ -882,11 +940,11 @@ func (m *bpfEndpointManager) calculateTCAttachPoint(endpointType tc.EndpointType
 	var ap tc.AttachPoint
 
 	if endpointType == tc.EpTypeWorkload {
-		// Policy direction is relative to the workload so, from the host namespace it's flipped.
+		// Program inside the pod so ingress = ingress
 		if policyDirection == PolDirnIngress {
-			ap.Hook = tc.HookEgress
-		} else {
 			ap.Hook = tc.HookIngress
+		} else {
+			ap.Hook = tc.HookEgress
 		}
 	} else {
 		// Host endpoints have the natural relationship between policy direction and hook.
@@ -903,12 +961,19 @@ func (m *bpfEndpointManager) calculateTCAttachPoint(endpointType tc.EndpointType
 	} else {
 		toOrFrom = tc.ToEp
 	}
+	if endpointType == tc.EpTypeWorkload {
+		if ap.Hook == tc.HookIngress {
+			toOrFrom = tc.ToEp
+		} else {
+			toOrFrom = tc.FromEp
+		}
+	}
 
 	ap.Iface = ifaceName
 	ap.Type = endpointType
 	ap.ToOrFrom = toOrFrom
 	ap.ToHostDrop = m.epToHostDrop
-	ap.FIB = m.fibLookupEnabled
+	ap.FIB = endpointType != tc.EpTypeWorkload && m.fibLookupEnabled
 	ap.DSR = m.dsrEnabled
 	ap.LogLevel = m.bpfLogLevel
 

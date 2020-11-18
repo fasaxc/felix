@@ -35,6 +35,7 @@ require (
 	github.com/spf13/viper v1.6.1
 	github.com/stretchr/testify v1.5.1 // indirect
 	github.com/vishvananda/netlink v1.1.0
+	github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df
 	golang.org/x/net v0.0.0-20200520004742-59133d7f0dd7
 	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 	golang.org/x/sys v0.0.0-20200519105757-fe76b779f299
